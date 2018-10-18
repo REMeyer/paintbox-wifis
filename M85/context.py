@@ -9,6 +9,7 @@ Context file for the work on galaxy M85.
 
 """
 import getpass
+import astropy.units as u
 import matplotlib.pyplot as plt
 
 if getpass.getuser() == "kadu":
@@ -20,3 +21,7 @@ plt.style.context("seaborn-paper")
 plt.rcParams["text.usetex"] = True
 plt.rcParams["font.family"] = "serif"
 plt.rcParams['font.serif'] = 'Computer Modern'
+
+# NED results
+z = 0.002432
+vsyst = 729 * u.km / u.s
