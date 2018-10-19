@@ -25,13 +25,12 @@ def plot_wifis_vel_resolution(mode=None):
     R = Rs[mode]
     fwhm = wave / R
     velscale = constants.c.to("km/s") * fwhm / wave / 2.634
-    print(velscale)
     plt.style.use("seaborn-paper")
     plt.figure(1)
     plt.minorticks_on()
     plt.plot(wave, velscale, "-")
-    plt.xlabel("$\lambda$ ($\AA$)")
-    plt.ylabel(r"Velocity scale - sigma (km/s)")
+    # plt.xlabel("$\lambda$ ($\AA$)")
+    # plt.ylabel(r"Velocity scale - sigma (km/s)")
     plt.show()
 
 if __name__ == "__main__":
