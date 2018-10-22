@@ -21,17 +21,16 @@ import matplotlib.pyplot as plt
 from vorbin.voronoi_2d_binning import voronoi_2d_binning
 
 import context
+from misc import snr
+from spectral_resampling import spectres
 
-def make_voronoi(data, error, targetSN, redo=False):
+def make_voronoi(data, targetSN, redo=False):
     """ Determination of SNR for each spaxel.
 
     Input parameters
     ----------------
     data : np.array
         Science data cube
-
-    error : np.array
-        Uncertainties of the data cube.
 
     targetSN: float
         Value of the goal SNR.
@@ -48,10 +47,7 @@ def make_voronoi(data, error, targetSN, redo=False):
     output = "voronoi_sn{}.fits".format(targetSN)
     if os.path.exists(output) and not redo:
         return
-    signal = np.nanmedian(data, axis=0)
-    sn3D = data / error
-    sn = np.nanmedian(sn3D, axis=(0,1))
-    noise = signal / sn
+    signal, noise, sn = snr(data)
     zdim, ydim, xdim = data.shape
     xx, yy = np.meshgrid(np.arange(xdim), np.arange(ydim))
     # Selecting only saxels where the percentage of nans is low
@@ -121,10 +117,12 @@ def combine_spectra(data, error, header, targetSN, redo=False):
         errors = error[:,idy,idx]
         errs = np.sqrt(np.nansum(errors**2, axis=1)) / ncombine
         combined = np.nanmean(specs, axis=1)
-        table = Table([wave, combined, errs], names=["wave", "flux", "fluxerr"])
+        combined[np.isnan(combined)] = 0
+        mask = np.where(combined==0, 0., 1.)
+        table = Table([wave.to("micrometer").data, combined, errs, mask],
+                      names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
         table.write(output, overwrite=True)
     return
-
 
 if __name__ == "__main__":
     os.chdir(context.data_dir)
@@ -138,5 +136,5 @@ if __name__ == "__main__":
     errdata = errdata.sum(axis=0)
     header = fits.getheader(datacube)
     # Processing data
-    make_voronoi(data, errdata, targetSN)
+    make_voronoi(data, targetSN, redo=True)
     combine_spectra(data, errdata, header, targetSN, redo=True)
