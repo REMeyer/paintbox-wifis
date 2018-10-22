@@ -22,14 +22,15 @@ from astropy.table import Table
 import matplotlib.pyplot as plt
 
 import context
+from spectral_resampling import spectres
 
-def extract_telluric_std_spectrum(plot=False):
+def extract_telluric_std_spectrum(cube, img, output, plot=False, redo=False):
     """Determination of aperture and extraction of 1D spectrum. """
+    if os.path.exists(output) and not redo:
+        return
     ############################################################################
     # Defining the aperture with maximum S/N using the image as a reference
-    imgfile = os.path.join(context.home,
-                           "data/HIP56736_combined_cubeImg_1.fits")
-    data = fits.getdata(imgfile)
+    data = fits.getdata(img)
     mean, median, std = sigma_clipped_stats(data, sigma=3.0, iters=5)
     daofind = DAOStarFinder(fwhm=2.1, threshold=10.*std)
     star= daofind(data - median)
@@ -45,8 +46,7 @@ def extract_telluric_std_spectrum(plot=False):
     best_rad = radii[idx] / 0.673
     ############################################################################
     # Extracting the spectra from the datacube
-    datacube = os.path.join(context.home, "data/HIP56736_combined_cube_1.fits")
-    cube = fits.getdata(datacube)
+    cube = fits.getdata(cube)
     zdim, ydim, xdim = cube.shape
     x = np.arange(xdim) + 1
     y = np.arange(ydim) + 1
@@ -67,8 +67,6 @@ def extract_telluric_std_spectrum(plot=False):
     mask[np.isnan(spec1D)] = 0.
     table = Table([wave.to("micrometer"), spec1D, err, mask],
                   names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
-    output = os.path.join(context.home,
-                           "data/HIP56736_spec1D.fits")
     table.write(output, format="fits", overwrite=True)
     # Plot used to check the results
     if plot:
@@ -80,6 +78,49 @@ def extract_telluric_std_spectrum(plot=False):
         plt.legend(ncol=3)
         plt.show()
 
+def rebin_telluric(reftab, teltab, output, redo=False):
+    """ Rebin the standard star spectra to match observations of science
+    cubes. """
+    if os.path.exists(output) and not redo:
+        return
+    refdata = Table.read(reftab)
+    teldata = Table.read(teltab)
+    wave = teldata["WAVE"].data
+    flux = teldata["FLUX"].data
+    flux[np.isnan(flux)] = 0.
+    fluxerr = teldata["FLUX_ERR"].data
+    refwave = refdata["WAVE"].data
+    dw = np.diff(wave)[0]
+    # Appending extra wavelength to cover the whole wavelength of the reference
+    # spectrum
+    if wave[0] >= refwave[0]:
+        nbins = int((wave[0] - refwave[0]) / dw) + 5
+        extrawave = wave[0] - np.arange(1, nbins)[::-1] * dw
+        wave = np.hstack((extrawave, wave))
+        flux = np.hstack((np.zeros(nbins), flux))
+        fluxerr = np.hstack((np.zeros(nbins), fluxerr))
+    if wave[0] <= refwave[0]:
+        nbins = int((refwave[-1] - wave[-1]) / dw) + 5
+        extrawave = wave[-1] + np.arange(1, nbins) * dw
+        wave = np.hstack((wave, extrawave))
+        flux = np.hstack((flux, np.zeros(nbins)))
+        fluxerr = np.hstack((fluxerr, np.zeros(nbins)))
+    newflux = spectres(refwave, wave, flux)
+    newfluxerr = spectres(refwave, wave, fluxerr)
+    mask = np.ones_like(refwave)
+    mask[np.isnan(newflux)] = 0
+    table = Table([refwave, newflux, newfluxerr, mask],
+                  names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
+    table.write(output, overwrite=True)
+
 if __name__ == "__main__":
-    extract_telluric_std_spectrum(plot=True)
+    imgfile = os.path.join(context.home,
+                           "data/HIP56736_combined_cubeImg_1.fits")
+    datacube = os.path.join(context.home, "data/HIP56736_combined_cube_1.fits")
+    telluric_table = os.path.join(context.home, "data/HIP56736_spec1D.fits")
+    extract_telluric_std_spectrum(datacube, imgfile, telluric_table, plot=False,
+                                  redo=False)
+    reftable = os.path.join(context.home, "data/spec1d_sn80/sn80_0001.fits")
+    output = os.path.join(context.home, "data/molecfit/HIP56736_spec1D.fits")
+    rebin_telluric(reftable, telluric_table, output, redo=False)
 
