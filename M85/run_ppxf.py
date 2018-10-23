@@ -163,9 +163,10 @@ class pPXF():
             pickle.dump(self, f)
         return
 
-def run_ppxf(w1, w2, targetSN, tempfile, velscale=None, redo=False,
-             ncomp=2, dataset=None, test=False, **kwargs):
+def run_ppxf(galaxy_dir, w1, w2, targetSN, tempfile, velscale=None, redo=False,
+             ncomp=2, test=False, **kwargs):
     """ New function to run pPXF. """
+    cwd = os.getcwd()
     logwave_temp = Table.read(tempfile, hdu=3)["loglam"].data
     wave_temp = np.exp(logwave_temp)
     stars = fits.getdata(tempfile, 0)
@@ -185,10 +186,10 @@ def run_ppxf(w1, w2, targetSN, tempfile, velscale=None, redo=False,
         components = np.hstack((np.zeros(nstars), np.ones(ngas))).astype(int)
         kwargs["component"] = components
     ###########################################################################
-    wdir = os.path.join(context.data_dir, "molecfited_sn{}".format(targetSN))
-    os.chdir(wdir)
-    logdir = os.path.join(wdir, "ppxf_vel{}_w{}_{}_sn{}".format(int(velscale),
-                           w1, w2, targetSN))
+    data_dir = os.path.join(galaxy_dir, "molecfited_sn{}".format(targetSN))
+    os.chdir(data_dir)
+    logdir = os.path.join(data_dir, "ppxf_vel{}_w{}_{}_sn{}".format(int(
+        velscale), w1, w2, targetSN))
     if not os.path.exists(logdir):
         os.mkdir(logdir)
     # Processing the spectra of a field
@@ -260,35 +261,32 @@ def run_ppxf(w1, w2, targetSN, tempfile, velscale=None, redo=False,
         pp.plot(output=os.path.join(logdir, "{}.png".format(pp.name)))
         pp.save(logdir)
         plt.clf()
-
+    os.chdir(cwd)
     return
 
-def make_table(w1, w2, targetSN, dataset="MUSE-DEEP",
+def make_table(galaxy_dir, w1, w2, targetSN, dataset="MUSE-DEEP",
                velscale=None, redo=True):
     """ Make table with results. """
-    if velscale is None:
-        velscale = context.velscale
-    output = os.path.join(context.data_dir, dataset, "tables",
-                          "ppxf_results_vel{}_sn{}_w{}_{}.fits".format(int(
-                              velscale), targetSN, w1, w2))
+    cwd = os.getcwd()
+    velscale = 20 if velscale is None else velscale
+    data_dir = os.path.join(galaxy_dir, "molecfited_sn{}".format(targetSN))
+    logdir = os.path.join(data_dir, "ppxf_vel{}_w{}_{}_sn{}".format(int(
+                          velscale), w1, w2, targetSN))
+    output = os.path.join(galaxy_dir, "ppxf_vel{}_sn{}_w{}_{}.fits"
+                          "".format(int(velscale), targetSN, w1, w2))
+    print(output)
     if os.path.exists(output) and not redo:
         return
     names, sols, errors, chi2s, sns = [], [], [], [], []
     adegrees, mdegrees = [], []
-    geoms = []
-    print("Producing summary for Field {0}".format(field[-1]))
-    geoms.append(get_geom(field, targetSN))
-    logdir = os.path.join(context.data_dir, dataset, field,
-                          "ppxf_vel{}_w{}_{}_sn{}".format(int(velscale),
-                           w1, w2, targetSN))
+    print("Producing summary for {}".format(data_dir.split("/")[-1]))
     os.chdir(logdir)
-    pkls = sorted([x for x in os.listdir(".") if x.endswith("pkl")])
+    pkls = sorted([_ for _ in os.listdir(".") if _.endswith("pkl")])
     for i, fname in enumerate(pkls):
         print(" Processing pPXF solution {0} / {1}".format(i+1, len(pkls)))
         with open(fname, "rb") as f:
             pp = pickle.load(f)
         sol = pp.sol if pp.ncomp == 1 else pp.sol[0]
-        sol[0] += context.vhelio[field]
         sols.append(sol)
         error = pp.error if pp.ncomp == 1 else pp.error[0]
         errors.append(error)
@@ -297,18 +295,19 @@ def make_table(w1, w2, targetSN, dataset="MUSE-DEEP",
         adegrees.append(pp.degree)
         mdegrees.append(pp.mdegree)
         names.append(pp.name)
-    geoms = vstack(geoms)
     sols = np.array(sols).T
     errors = np.array(errors).T
-    kintable = Table(data=[names, sols[0] * u.km / u.s , errors[0] * u.km /
+    adegrees = np.array(adegrees).astype(np.float32)
+    mdegrees = np.array(mdegrees).astype(np.float32)
+    table = Table(data=[names, sols[0] * u.km / u.s , errors[0] * u.km /
                            u.s, sols[1] * u.km / u.s, errors[1] * u.km / u.s,
                            sols[2], errors[2], sols[3], errors[3], chi2s,
                            sns, adegrees, mdegrees], \
-                     names=["SPEC", "V", "Verr", "SIGMA", "SIGMAerr", "H3",
-                            "H3err", "H4", "H4err", "CHI2", "S/N", "ADEGREE",
-                            "MDEGREE"])
-    results = hstack([kintable, geoms])
-    results.write(output, format="fits", overwrite=True)
+                     names=["spec", "v", "verr", "sigma", "sigmaerr", "h3",
+                            "h3err", "h4", "h4err", "chi2", "snr", "adegree",
+                            "mdegree"])
+    table.write(output, format="fits", overwrite=True)
+    os.chdir(cwd)
     return
 
 
@@ -333,11 +332,12 @@ def run_stellar_populations(targetSN, w1, w2,
     start = np.array([v0, 50, 0., 0.])
     kwargs = {"start" :  start,
               "plot" : False, "moments" : [4], "degree" : 20,
-              "mdegree" : 0, "reddening" : None, "clean" : True,
+              "mdegree" : 5, "reddening" : None, "clean" : True,
               "bounds" : bounds, "velscale" : velscale}
-    # run_ppxf(w1, w2, targetSN, tempfile, redo=redo, ncomp=1,
-    #          **kwargs)
-    make_table(w1, w2, targetSN, redo=True)
+    galaxy_dir = context.data_dir
+    run_ppxf(galaxy_dir, w1, w2, targetSN, tempfile, redo=redo, ncomp=1,
+             **kwargs)
+    make_table(galaxy_dir, w1, w2, targetSN, redo=True, velscale=velscale)
     return
 
 if __name__ == '__main__':
