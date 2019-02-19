@@ -11,10 +11,7 @@ from __future__ import print_function, division
 
 import os
 
-import numpy as np
-from astropy.table import Table, hstack
-from astropy.io import fits
-from astropy.wcs import WCS
+from astropy.table import Table
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -23,8 +20,8 @@ import context
 if __name__ == "__main__":
     table_file = os.path.join(context.data_dir, "PXF_bin_MS_NGC4382_r5_idl.fits")
     data = Table.read(table_file)
-    fields = ["VPXF", 'SPXF', 'H3PXF', 'H4PXF']
-    labels = ["V (km/s)", "$\sigma$ (km/s)", "$h_3$", "$h_4$"]
+    fields = ["VPXF", 'SPXF', 'H3PXF', 'H4PXF', "VPXF_VS", "SPXF_VS"]
+    labels = ["V (km/s)", "$\sigma$ (km/s)", "$h_3$", "$h_4$", "V (km/s)", "$\sigma$ (km/s)"]
     outdir = os.path.join(context.data_dir, "plots", "atlas3d")
     if not os.path.exists(outdir):
         os.mkdir(outdir)
