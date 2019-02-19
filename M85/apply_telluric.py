@@ -29,13 +29,16 @@ def apply_molecfit(targetSN, molecfit_file):
     specs = sorted(os.listdir(data_dir))
     for spec in specs:
         data = Table.read(os.path.join(data_dir, spec))
+        plt.plot(data["WAVE"], data["FLUX"], "-")
         data["FLUX"] /= trans["mtrans"]
         data["FLUX_ERR"] /= trans["mtrans"]
+        plt.plot(data["WAVE"], data["FLUX"], "-")
+        plt.show()
         data.write(os.path.join(outdir, spec), overwrite=True)
 
 
 if __name__ == "__main__":
-    targetSN = 80
+    targetSN = 40
     molecfit_file = os.path.join(context.home,
                     "data/molecfit/output/HIP56736_spec1D_TAC.fits")
     apply_molecfit(targetSN, molecfit_file)
