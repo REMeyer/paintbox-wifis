@@ -65,7 +65,7 @@ def plot_map(table, vorimg, fields, outdir, lims=None, labels=None,
 
 
 if __name__ == "__main__":
-    targetSN = 80
+    targetSN = 40
     w1 = 8500
     w2 = 13500
     velscale = 20
@@ -86,4 +86,6 @@ if __name__ == "__main__":
     outdir = os.path.join(context.data_dir, "plots", "ppxf_sn{}".format(targetSN))
     if not os.path.exists(outdir):
         os.mkdir(outdir)
-    plot_map(table, vorimg, fields, outdir, labels=labels, wcs=wcs)
+    lims = [[780, 950], [100, 250]] + 2 * [[None, None]]
+    plot_map(table, vorimg, fields, outdir, labels=labels, wcs=wcs,
+             lims=lims)
