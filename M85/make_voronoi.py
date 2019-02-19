@@ -127,7 +127,7 @@ def combine_spectra(data, error, header, targetSN, redo=False):
 if __name__ == "__main__":
     os.chdir(context.data_dir)
     # Input
-    targetSN = 80
+    targetSN = 40
     datacube = "M85_combined_cube_2.fits"
     errcube = "M85_unc_cube.fits"
     # Reading data
