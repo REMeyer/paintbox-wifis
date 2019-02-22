@@ -41,18 +41,19 @@ def std_phot(cube, img, output, r=30, redo=False):
     R = np.sqrt((X - star["xcentroid"])**2 + (Y - star["ycentroid"])**2)
     ############################################################################
     # Extracting stellar spectrum from the datacube
-    cube = fits.getdata(cube)
-    idx = np.where(R <= r)
-    npix = len(idx[0])
-    specs = cube[:, idx[0], idx[1]]
-    hdr = fits.getheader(stdcube)
+    data = fits.getdata(cube)
+    hdr = fits.getheader(cube)
     wave = ((np.arange(hdr['NAXIS3']) + 1 - hdr['CRPIX3']) * hdr['CDELT3'] + \
            hdr['CRVAL3']) * u.m
+    exptime = hdr["OBJTIME"]
+    data /= exptime
+    idx = np.where(R <= r)
+    npix = len(idx[0])
+    specs = data[:, idx[0], idx[1]]
     spec1D = np.nansum(specs, axis=1)
     # Extracting background spectrum
     idxb = np.where(R > r)
-    bkg = np.nanmedian(cube[:, idxb[0], idxb[1]], axis=1) * npix
-    # Sky subtraction
+    bkg = np.nanmedian(data[:, idxb[0], idxb[1]], axis=1) * npix
     spec1D -= bkg
     # Preparing output table
     err = np.zeros_like(spec1D) # necessary for molecfit table
@@ -107,6 +108,7 @@ if __name__ == "__main__":
     std_table = os.path.join(context.home, "data/HIP56736_spec1D.fits")
     # Extracting photometry
     std_phot(stdcube, imgfile, std_table, redo=True)
+    # Molecfit requires the same dispersion for both data and standards
     # Rebin spectrum to match dispersion of data cube
     reftable = os.path.join(context.home, "data/spec1d_sn80/sn80_0001.fits")
     output = os.path.join(context.home, "data/molecfit/HIP56736_spec1D.fits")
