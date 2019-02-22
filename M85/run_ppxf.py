@@ -313,27 +313,31 @@ def make_table(galaxy_dir, w1, w2, targetSN, dataset="MUSE-DEEP",
 
 def run_stellar_populations(targetSN, w1, w2,
                             sampling=None, velscale=None, redo=False,
-                            dataset=None):
+                            dataset=None, ncomp=1):
     """ Run pPXF on binned data using stellar population templates"""
     tempfile = os.path.join(context.home, "templates",
                "emiles_wifis_vel{}_w{}_{}_{}.fits".format(int(velscale), w1, w2,
                                                     sampling))
     v0 = context.vsyst.value
-    # bounds = np.array([[[v0 - 2000, v0 + 2000.], [3., 800.], [-0.3, 0.3],
-    #                     [-0.3, 0.3]],
-    #                    [[v0 - 2000., v0 + 2000.], [3., 80.], [-0.3, 0.3],
-    #                     [-0.3, 0.3]]])
-    # kwargs = {"start" :  np.array([[v0, 50, 0., 0.], [v0, 50., 0, 0]]),
-    #           "plot" : False, "moments" : [4], "degree" : 12,
-    #           "mdegree" : 0, "reddening" : None, "clean" : False,
-    #           "bounds" : bounds, "velscale" : velscale}
-    bounds = np.array([[v0 - 2000, v0 + 2000.], [3., 800.], [-0.3, 0.3],
-                        [-0.3, 0.3]])
-    start = np.array([v0, 50, 0., 0.])
-    kwargs = {"start" :  start,
-              "plot" : False, "moments" : [4], "degree" : 20,
-              "mdegree" : 5, "reddening" : None, "clean" : True,
-              "bounds" : bounds, "velscale" : velscale}
+    if ncomp == 1:
+        bounds = np.array([[v0 - 2000, v0 + 2000.], [3., 800.], [-0.3, 0.3],
+                            [-0.3, 0.3]])
+        start = np.array([v0, 50, 0., 0.])
+        kwargs = {"start" :  start,
+                  "plot" : False, "moments" : [4], "degree" : 20,
+                  "mdegree" : 5, "reddening" : None, "clean" : True,
+                  "bounds" : bounds, "velscale" : velscale}
+    elif ncomp == 2:
+        bounds = np.array([[[v0 - 2000, v0 + 2000.], [3., 800.], [-0.3, 0.3],
+                            [-0.3, 0.3]],
+                           [[v0 - 2000., v0 + 2000.], [3., 80.], [-0.3, 0.3],
+                            [-0.3, 0.3]]])
+        kwargs = {"start" :  np.array([[v0, 50, 0., 0.], [v0, 50., 0, 0]]),
+                  "plot" : False, "moments" : [4], "degree" : 12,
+                  "mdegree" : 0, "reddening" : None, "clean" : False,
+                  "bounds" : bounds, "velscale" : velscale}
+    else:
+        pass
     galaxy_dir = context.data_dir
     run_ppxf(galaxy_dir, w1, w2, targetSN, tempfile, redo=redo, ncomp=1,
              **kwargs)
@@ -341,11 +345,11 @@ def run_stellar_populations(targetSN, w1, w2,
     return
 
 if __name__ == '__main__':
-    targetSN = 80
+    targetSN = 40
     w1 = 8500
     w2 = 13500
     velscale = 20
     ##########################################################################
     # Running stellar populations
-    run_stellar_populations(targetSN, w1, w2, velscale=20,
+    run_stellar_populations(targetSN, w1, w2, velscale=velscale,
                             sampling="kinematics", redo=False)
