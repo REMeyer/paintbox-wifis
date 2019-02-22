@@ -17,12 +17,10 @@ import numpy as np
 import astropy.units as u
 from astropy.io import fits
 from astropy.table import Table
-import matplotlib.pyplot as plt
 from vorbin.voronoi_2d_binning import voronoi_2d_binning
 
 import context
 from misc import snr
-from spectral_resampling import spectres
 
 def make_voronoi(data, targetSN, redo=False):
     """ Determination of SNR for each spaxel.
@@ -106,22 +104,27 @@ def combine_spectra(data, error, header, targetSN, redo=False):
              - header['CRPIX3']) * header['CDELT3'] + header['CRVAL3']) * u.m
     vordata = fits.getdata("voronoi_sn{}.fits".format(targetSN), 0)
     bins = np.unique(vordata[~np.isnan(vordata)])
+    filelist = []
     for j, bin in enumerate(bins):
         idy, idx = np.where(vordata == bin)
         ncombine = len(idx)
         print("Bin {0} / {1} (ncombine={2})".format(j + 1, bins.size, ncombine))
-        output = os.path.join(outdir, "sn{}_{:04d}.fits".format(targetSN, int(bin)))
+        output = os.path.join(outdir, "sn{}_{:04d}.fits".format(targetSN,
+                                                                int(bin)))
         if os.path.exists(output) and not redo:
             continue
         specs = data[:,idy,idx]
         errors = error[:,idy,idx]
-        errs = np.sqrt(np.nansum(errors**2, axis=1)) / ncombine
-        combined = np.nanmean(specs, axis=1)
+        errs = np.sqrt(np.nansum(errors**2, axis=1))
+        combined = np.nanmean(specs, axis=1) * ncombine
         combined[np.isnan(combined)] = 0
         mask = np.where(combined==0, 0., 1.)
         table = Table([wave.to("micrometer").data, combined, errs, mask],
                       names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
         table.write(output, overwrite=True)
+        filelist.append(output)
+    with open("filelist_sn{}.txt".format(targetSN), "w") as f:
+        f.write("\n".join(filelist))
     return
 
 if __name__ == "__main__":
@@ -133,8 +136,12 @@ if __name__ == "__main__":
     # Reading data
     data = fits.getdata(datacube)
     errdata = fits.getdata(errcube)
-    errdata = errdata.sum(axis=0)
+    errdata = errdata.sum(axis=0)# Removing extra dimension
+    # Normalizing by the exposure time
     header = fits.getheader(datacube)
+    exptime = header["OBJTIME"]
+    data /=  exptime
+    errdata /= exptime
     # Processing data
-    make_voronoi(data, targetSN, redo=True)
+    make_voronoi(data, targetSN, redo=False)
     combine_spectra(data, errdata, header, targetSN, redo=True)
