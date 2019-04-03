@@ -128,6 +128,8 @@ def combine_spectra(data, error, header, targetSN, redo=False):
     return
 
 if __name__ == "__main__":
+    wdir = os.path.join(context.data_dir)
+    
     os.chdir(context.data_dir)
     # Input
     targetSN = 40
