@@ -16,15 +16,13 @@ import os
 import numpy as np
 import astropy.units as u
 from astropy.io import fits
-from photutils import DAOStarFinder, aperture_photometry, CircularAperture
+from photutils import DAOStarFinder
 from astropy.stats import sigma_clipped_stats
 from astropy.table import Table
-import matplotlib.pyplot as plt
 
-import context
 from spectres import spectres
 
-def std_phot(cube, img, output, r=30, redo=False):
+def stdphot(cube, img, output, r=30, redo=False):
     """Determination of aperture and extraction of 1D spectrum. """
     if os.path.exists(output) and not redo:
         return
@@ -64,7 +62,7 @@ def std_phot(cube, img, output, r=30, redo=False):
     table.write(output, format="fits", overwrite=True)
     return
 
-def rebin_std(reftab, teltab, output, redo=False):
+def rebinstd(reftab, teltab, output, redo=False):
     """ Rebin the standard star spectra to match observations of science
     cubes. """
     if os.path.exists(output) and not redo:
@@ -98,19 +96,4 @@ def rebin_std(reftab, teltab, output, redo=False):
     table = Table([refwave, newflux, newfluxerr, mask],
                   names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
     table.write(output, overwrite=True)
-
-if __name__ == "__main__":
-    # Input files
-    imgfile = os.path.join(context.home,
-                           "data/HIP56736_combined_cubeImg_1.fits")
-    stdcube = os.path.join(context.home, "data/HIP56736_combined_cube_1.fits")
-    # Output table
-    std_table = os.path.join(context.home, "data/HIP56736_spec1D.fits")
-    # Extracting photometry
-    std_phot(stdcube, imgfile, std_table, redo=True)
-    # Molecfit requires the same dispersion for both data and standards
-    # Rebin spectrum to match dispersion of data cube
-    reftable = os.path.join(context.home, "data/spec1d_sn80/sn80_0001.fits")
-    output = os.path.join(context.home, "data/molecfit/HIP56736_spec1D.fits")
-    rebin_std(reftable, std_table, output, redo=True)
 
