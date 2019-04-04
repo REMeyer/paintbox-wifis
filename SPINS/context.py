@@ -14,10 +14,7 @@ import getpass
 import astropy.units as u
 import matplotlib.pyplot as plt
 
-if getpass.getuser() == "kadu":
-    home = "/home/kadu/Dropbox/WIFIS/M85"
-else:
-    home = "/sto/home/cebarbosa/WIFIS/M85"
+home = "/home/kadu/Dropbox/spins"
 
 data_dir = os.path.join(home, "data")
 
