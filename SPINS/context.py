@@ -9,14 +9,15 @@ Context file for the work on galaxy M85.
 
 """
 import os
-import getpass
 
 import astropy.units as u
 import matplotlib.pyplot as plt
 
-home = "/home/kadu/Dropbox/spins"
+home_dir = os.path.expanduser("~")
+project_dir = os.path.join(home_dir, "Dropbox/spins")
+molecfit_exec_dir = os.path.join(home_dir, "molecfit/bin")
 
-data_dir = os.path.join(home, "data")
+data_dir = os.path.join(project_dir, "data")
 
 plt.style.context("seaborn-paper")
 plt.rcParams["text.usetex"] = True
