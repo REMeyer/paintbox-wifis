@@ -14,13 +14,54 @@ from __future__ import print_function, division
 import os
 
 import numpy as np
+from tqdm import tqdm
 import astropy.units as u
-from astropy import constants
 from astropy.table import Table
-import matplotlib.pyplot as plt
 from spectres import spectres
 
 import context
+
+def apply_flux_calibration(obsstar, obsspec, outdir, redo=False,
+                           reference=None, wmin=0.88, wmax=1.3, dmag=0.):
+    if os.path.exists(outdir) and not redo:
+        return
+    reference = "Vega" if reference is None else reference
+    observed = Table.read(obsstar)
+    # Remove regions outside wavelength range
+    idx = np.where((observed["WAVE"] > wmin) & (observed["WAVE"] < wmax))
+    observed = observed[idx]
+    # Reading template table
+    if reference == "Vega":
+        template = Table.read(os.path.join(context.data_dir,
+                                           "rieke2008/table7.fits"))
+        template.rename_column("lambda", "WAVE")
+        template.rename_column("Vega", "FLUX")
+    else:
+        pass
+    # Cropping template in wavelength
+    idx = np.where((template["WAVE"] > wmin) & (template["WAVE"] < wmax))
+    template = template[idx]
+    ############################################################################
+    # Scaling the flux of Vega to that of the standard star
+    stdflux = template["FLUX"] * np.power(10, -0.4 * dmag)
+    # Determining the sensitivity function
+    sensfun = calc_sensitivity_function(observed["WAVE"], observed["tacflux"],
+                            template["WAVE"], stdflux)
+    # Applying sensitivity function to galaxy spectra
+    print("Applying flux calibration...")
+    for spec in tqdm(obsspec):
+        table = Table.read(spec)
+        idx = np.where((table["WAVE"] > wmin) & (table["WAVE"] < wmax))
+        table = table[idx]
+        wave = table["WAVE"] * u.micrometer
+        newflux = table["tacflux"].data * sensfun(wave) * template["FLUX"].unit
+        newfluxerr = table["tacdflux"].data * sensfun(wave) * template[
+            "FLUX"].unit
+        newtable = Table([wave, newflux, newfluxerr], names=["WAVE", "FLUX",
+                                                             "FLUX_ERR"])
+        newtable.write(os.path.join(outdir, os.path.split(spec)[1]),
+                       overwrite=True)
+
 
 def calc_sensitivity_function(owave, oflux, twave, tflux, order=40):
     """ Calculates the sensitivity function using a polynomial approximation.
@@ -36,41 +77,3 @@ def calc_sensitivity_function(owave, oflux, twave, tflux, order=40):
     tflux = spectres(wave, twave, tflux)
     sens = np.poly1d(np.polyfit(wave, tflux / oflux, order))
     return sens
-
-
-if __name__ == "__main__":
-    observed = Table.read(os.path.join(context.home,
-                          "data/molecfit/output/HIP56736_spec1D_TAC.fits"))
-    wmin = 0.885
-    wmax = 1.300
-    # Remove zeros from spectrum
-    idx = np.where((observed["WAVE"] > wmin) & (observed["WAVE"] < wmax))
-    observed = observed[idx]
-    # Reading template table
-    template = Table.read(os.path.join(context.home, "rieke2008/table7.fits"))
-    # Cropping template in wavelength
-    idx = np.where((template["lambda"] > wmin) & (template["lambda"] < wmax))
-    template = template[idx]
-    # Scaling the flux of Vega to that of the standard star
-    deltamag = 8.857
-    stdflux = template["Vega"] * np.power(10, -0.2 * deltamag)
-    # Determining the sensitivity function
-    sensfun = calc_sensitivity_function(observed["WAVE"], observed["tacflux"],
-                            template["lambda"], stdflux)
-    # Applying sensitivity function to galaxy spectra
-    targetSN = 40
-    wdir = os.path.join(context.home, "data/molecfit_sn{}".format(targetSN))
-    outdir = os.path.join(context.home, "data/fcalib_sn{}".format(targetSN))
-    if not os.path.exists(outdir):
-        os.mkdir(outdir)
-    for filename in sorted(os.listdir(wdir)):
-        table = Table.read(os.path.join(wdir, filename))
-        idx = np.where((table["WAVE"] > wmin) & (table["WAVE"] < wmax))
-        table = table[idx]
-        wave = table["WAVE"] * u.micrometer
-        newflux = table["tacflux"].data * sensfun(wave) * template["Vega"].unit
-        newfluxerr = table["tacdflux"].data * sensfun(wave) * template[
-            "Vega"].unit
-        newtable = Table([wave, newflux, newfluxerr], names=["WAVE", "FLUX",
-                                                             "FLUX_ERR"])
-        newtable.write(os.path.join(outdir, filename), overwrite=True)
