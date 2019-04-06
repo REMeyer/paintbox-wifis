@@ -73,7 +73,8 @@ def make_voronoi(datacube, targetSN, output, redo=False):
     hdulist = fits.HDUList([vorHDU, tabHDU])
     hdulist.writeto(output, overwrite=True)
 
-def combine_spectra(datacube, vorfile, outdir, redo=False, error=None):
+def combine_spectra(datacube, vorfile, outdir, redo=False, error=None,
+                    init=None):
     """ Produces the combined spectra for a given binning file.
 
     Input Parameters
@@ -95,6 +96,7 @@ def combine_spectra(datacube, vorfile, outdir, redo=False, error=None):
 
 
     """
+    init = "spec" if init is None else init
     data = fits.getdata(datacube)
     header = fits.getheader(datacube)
     wave = ((np.arange(header['NAXIS3']) + 1
@@ -105,7 +107,7 @@ def combine_spectra(datacube, vorfile, outdir, redo=False, error=None):
     for j, bin in enumerate(bins):
         idy, idx = np.where(vordata == bin)
         ncombine = len(idx)
-        output = os.path.join(outdir, "spec{:04d}.fits".format(int(bin)))
+        output = os.path.join(outdir, "{}{:04d}.fits".format(init, int(bin)))
         if os.path.exists(output) and not redo:
             continue
         print("Bin {0} / {1} (ncombine={2})".format(j + 1, bins.size, ncombine))
