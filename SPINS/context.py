@@ -29,7 +29,3 @@ plt.rcParams["xtick.minor.visible"] = True
 plt.rcParams["ytick.minor.visible"] = True
 plt.rcParams["xtick.top"] = True
 plt.rcParams["ytick.right"] = True
-
-# NED results
-z = 0.002432
-vsyst = 729 * u.km / u.s
