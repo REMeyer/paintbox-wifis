@@ -38,7 +38,7 @@ def run_molecfit(params, outdir, redo=False):
         yaml.dump(config, f, default_flow_style=False)
 
     molecfit = os.path.join(context.molecfit_exec_dir, "molecfit")
-    calctrans = os.path.join(context.molecfitexec__dir, "calctrans")
+    calctrans = os.path.join(context.molecfit_exec_dir, "calctrans")
     corrfilelist = os.path.join(context.molecfit_exec_dir, "corrfilelist")
     subprocess.run(["bash", molecfit, config_file])
     subprocess.run(["bash", calctrans, config_file])
