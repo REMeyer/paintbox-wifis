@@ -21,6 +21,7 @@ import yaml
 from datetime import datetime
 
 import numpy as np
+import astropy.units as u
 from astropy.io import fits
 from astroquery.vizier import Vizier
 
@@ -29,6 +30,7 @@ from make_voronoi import make_voronoi, combine_spectra
 from stdphot import stdphot, rebinstd
 from run_molecfit import run_molecfit
 from flux_calibration import apply_flux_calibration
+from prepare_templates import prepare_templates
 
 if __name__ == "__main__":
     home_dir = os.path.join(context.data_dir, "WIFIS")
@@ -50,6 +52,7 @@ if __name__ == "__main__":
         # Producing Voronoi binning
         datacube = os.path.join(data_dir, params["datacube"])
         dataheader = os.path.join(data_dir, params["datacube"])
+        skycube = os.path.join(data_dir, params["skycube"])
         if not os.path.exists(outdir):
             os.mkdir(outdir)
         vorfile = os.path.join(outdir, "voronoi.fits")
@@ -58,6 +61,7 @@ if __name__ == "__main__":
         if not os.path.exists(specs_dir):
             os.mkdir(specs_dir)
         combine_spectra(datacube, vorfile, specs_dir, redo=False)
+        combine_spectra(skycube, vorfile, specs_dir, redo=False, init="sky")
         ########################################################################
         # Extracting spectrum for telluric correction and flux calibration
         stdcube = os.path.join(data_dir, params["stdcube"])
@@ -87,7 +91,9 @@ if __name__ == "__main__":
         molecfit_params = {"user_workdir": outdir, "filename" : stdrebin,
                            "listname" : "filelist.txt",
                            "obsdate" : mjd, "utc" : utc_seconds,
-                           "telalt" : stdheader["ELEVATIO"]}
+                           "telalt" : stdheader["ELEVATIO"],
+                           "temp": params["temp"], "m1temp": params["m1temp"],
+                           "pres": params["pres"], "rhum": params["rhum"]}
         molecfit_dir = os.path.join(molecfit_params["user_workdir"], "molecfit")
         run_molecfit(molecfit_params, molecfit_dir, redo=False)
         ########################################################################
@@ -103,13 +109,13 @@ if __name__ == "__main__":
         std2mass = two_mass.query_object(stdname, catalog="II/246")[0][0]
         ref2mass = two_mass.query_object(params["fcalib_template"],
                                          catalog="II/246")[0][0]
-        dmag = std2mass["Kmag"] - ref2mass["Kmag"]
-        dmagerr = np.sqrt(std2mass["e_Kmag"]**2 + ref2mass["e_Kmag"]**2)
+        dmag = std2mass["Jmag"] - ref2mass["Kmag"]
+        dmagerr = np.sqrt(std2mass["e_Jmag"]**2 + ref2mass["e_Jmag"]**2)
         apply_flux_calibration(stdfile, specs, fcalib_dir, redo=False,
                                wmin=params["wmin"], wmax=params["wmax"],
                                reference=params["fcalib_template"],
                                dmag=dmag)
         ########################################################################
-
-
-
+        # Run pPXF on galaxy
+        templates_file = os.path.join(outdir, "emiles.fits")
+        prepare_templates(params, templates_file, redo=False)
