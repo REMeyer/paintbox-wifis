@@ -63,7 +63,7 @@ def apply_flux_calibration(obsstar, obsspec, outdir, redo=False,
                        overwrite=True)
 
 
-def calc_sensitivity_function(owave, oflux, twave, tflux, order=40):
+def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
     """ Calculates the sensitivity function using a polynomial approximation.
     """
 
