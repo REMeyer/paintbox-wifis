@@ -23,8 +23,6 @@ import context
 
 def apply_flux_calibration(obsstar, obsspec, outdir, redo=False,
                            reference=None, wmin=0.88, wmax=1.3, dmag=0.):
-    if os.path.exists(outdir) and not redo:
-        return
     reference = "Vega" if reference is None else reference
     observed = Table.read(obsstar)
     # Remove regions outside wavelength range
@@ -50,6 +48,9 @@ def apply_flux_calibration(obsstar, obsspec, outdir, redo=False,
     # Applying sensitivity function to galaxy spectra
     print("Applying flux calibration...")
     for spec in tqdm(obsspec):
+        output = os.path.join(outdir, os.path.split(spec)[1])
+        if os.path.exists(output) and not redo:
+            continue
         table = Table.read(spec)
         idx = np.where((table["WAVE"] > wmin) & (table["WAVE"] < wmax))
         table = table[idx]
@@ -59,8 +60,7 @@ def apply_flux_calibration(obsstar, obsspec, outdir, redo=False,
             "FLUX"].unit
         newtable = Table([wave, newflux, newfluxerr], names=["WAVE", "FLUX",
                                                              "FLUX_ERR"])
-        newtable.write(os.path.join(outdir, os.path.split(spec)[1]),
-                       overwrite=True)
+        newtable.write(output, overwrite=True)
 
 
 def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
