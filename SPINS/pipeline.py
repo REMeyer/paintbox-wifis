@@ -21,7 +21,6 @@ import yaml
 from datetime import datetime
 
 import numpy as np
-import astropy.units as u
 from astropy.io import fits
 from astroquery.vizier import Vizier
 
@@ -31,10 +30,11 @@ from stdphot import stdphot, rebinstd
 from run_molecfit import run_molecfit
 from flux_calibration import apply_flux_calibration
 from prepare_templates import prepare_templates
+from run_ppxf import run_ppxf
 
 if __name__ == "__main__":
     home_dir = os.path.join(context.data_dir, "WIFIS")
-    config_file = "sn30_mom2.yaml"
+    config_file = "sn40_mom2.yaml"
     # Setting up query of
     two_mass = Vizier(columns=["*", "+_r"])
     for gal in os.listdir(home_dir):
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         std2mass = two_mass.query_object(stdname, catalog="II/246")[0][0]
         ref2mass = two_mass.query_object(params["fcalib_template"],
                                          catalog="II/246")[0][0]
-        dmag = std2mass["Jmag"] - ref2mass["Kmag"]
+        dmag = std2mass["Jmag"] - ref2mass["Jmag"]
         dmagerr = np.sqrt(std2mass["e_Jmag"]**2 + ref2mass["e_Jmag"]**2)
         apply_flux_calibration(stdfile, specs, fcalib_dir, redo=False,
                                wmin=params["wmin"], wmax=params["wmax"],
@@ -119,3 +119,10 @@ if __name__ == "__main__":
         # Run pPXF on galaxy
         templates_file = os.path.join(outdir, "emiles.fits")
         prepare_templates(params, templates_file, redo=False)
+        specs = sorted([_ for _ in os.listdir(fcalib_dir) if
+                        _.startswith("spec")])
+        specs = [os.path.join(fcalib_dir, _) for _ in specs]
+        ppdir = os.path.join(outdir, "ppxf")
+        if not os.path.exists(ppdir):
+            os.mkdir(ppdir)
+        run_ppxf(specs, templates_file, params, ppdir)
