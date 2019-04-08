@@ -29,3 +29,5 @@ plt.rcParams["xtick.minor.visible"] = True
 plt.rcParams["ytick.minor.visible"] = True
 plt.rcParams["xtick.top"] = True
 plt.rcParams["ytick.right"] = True
+
+FWHM = 2.53 # WIFIS resolution in Angstrom
