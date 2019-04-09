@@ -17,6 +17,7 @@ import numpy as np
 import astropy.units as u
 from astropy.io import fits
 from astropy.table import Table
+from astropy.wcs import WCS
 from vorbin.voronoi_2d_binning import voronoi_2d_binning
 
 import misc
@@ -125,3 +126,18 @@ def combine_spectra(datacube, vorfile, outdir, redo=False, error=None,
         table.write(output, overwrite=True)
     print("Done!")
     return
+
+def add_wcs_to_voronoi(vorfile, refimg, redo=False):
+    """ Adds the WCS information from a reference image to the voronoi file. """
+    if not redo:
+        return
+    h = fits.getheader(refimg)
+    wcs = WCS(h).to_header()
+    hvor = fits.getheader(vorfile, ext=0)
+    hvor.extend(wcs)
+    vordata = fits.getdata(vorfile, ext=0)
+    tabdata = Table.read(vorfile)
+    vorHDU = fits.PrimaryHDU(vordata, header=hvor)
+    tabHDU = fits.BinTableHDU(tabdata)
+    hdulist = fits.HDUList([vorHDU, tabHDU])
+    hdulist.writeto(vorfile, overwrite=True)
