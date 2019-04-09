@@ -18,13 +18,13 @@ from ppxf.ppxf import ppxf
 
 import misc
 
-def run_ppxf(specs, templates_file, config, outdir, redo=False, regul=False):
+def run_ppxf(specs, templates_file, config, outdir, redo=False):
     """ Run pPXF in all spectra. """
     velscale = config["velscale"]
     ssp_templates = fits.getdata(templates_file, extname="SSPS").T
     params = Table.read(templates_file, hdu=1)
-    if regul:
-        ssp_templates, reg_dim, params = make_regul_array(ssp_templates, params)
+    # if regul:
+    #     ssp_templates, reg_dim, params = make_regul_array(ssp_templates, params)
     nssps = ssp_templates.shape[1]
     logwave_temp = Table.read(templates_file, hdu=2)
     start0 = [config["vsyst"], 100.]
@@ -65,7 +65,6 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False, regul=False):
         fluxerr /= flux_norm
         ########################################################################
         if np.all(fluxerr==0.):
-            print("Error in flux is zero, estimating S/N from input spectrum.")
             signal, noise, sn = misc.snr(flux)
             fluxerr = np.ones_like(fluxerr) * noise
         # Rebinning the data to a logarithmic scale for ppxf
@@ -98,12 +97,29 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False, regul=False):
         # components = np.hstack((np.zeros(nssps), np.ones(ngas))).astype(np.int)
         # gas_component = components > 0
         ########################################################################
-        # Fitting with two components
+        pp0 = ppxf(templates, galaxy, noise, velscale=velscale,
+                  plot=False, moments=config["nmoments"], start=start0,
+                  vsyst=dv, lam=np.exp(logLam), component=components,
+                  degree=config["degree"], quiet=False, sky=sky,
+                  mdegree=config["mdegree"], clean=False)
+        plt.clf()
+        X = pp0.galaxy - pp0.bestfit
+        medX = np.nanmedian(X)
+        mad = np.median(np.abs(X - medX))
+        std = 1.4826 * mad
+        noise = np.ones_like(pp0.galaxy) * std
         pp = ppxf(templates, galaxy, noise, velscale=velscale,
                   plot=True, moments=config["nmoments"], start=start0,
                   vsyst=dv, lam=np.exp(logLam), component=components,
                   degree=config["degree"], quiet=False, sky=sky,
                   mdegree=config["mdegree"], clean=config["clean"])
+        X = pp.galaxy - pp.bestfit
+        medX = np.nanmedian(X)
+        mad = np.median(np.abs(X - medX))
+        std = 1.4826 * mad
+        noise = np.ones_like(pp0.galaxy) * std
+        signal = np.median(pp0.galaxy)
+        sn = signal / noise
         # Calculating average stellar populations
         weights = Table([pp.weights[:nssps] * params["norm"]], names=[
             "mass_weight"])
@@ -116,6 +132,8 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False, regul=False):
         pp.nonzero_ssps = np.count_nonzero(weights)
         pp.flux_norm = flux_norm
         pp.colnames = params.colnames[:-1]
+        pp.sn = float(sn.mean())
+        pp.wsky = float(pp.weights[-1])
         # Saving the weights of the bestfit
         wtable = hstack([params[params.colnames[:-1]], weights])
         wtable.write(wfile, overwrite=True)
@@ -126,14 +144,15 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False, regul=False):
         table.write(afile, overwrite=True)
         # Saving results and plot
         save(pp, ppfile)
-        plt.savefig(imgfile, dpi=250)
+        plt.savefig(imgfile, dpi=400)
         plt.clf()
 
 def save(pp, output):
     """ Save results from pPXF into files excluding fitting arrays. """
     ppdict = {}
     save_keys = ["regul", "degree", "mdegree", "reddening", "clean", "ncomp",
-                 "chi2", "nonzero_ssps", "nssps", "flux_norm"]
+                 "chi2", "nonzero_ssps", "nssps", "flux_norm", "sn",
+                 "wsky"]
     save_keys += pp.colnames
     # Chi2 is a astropy.unit.quantity object, we have to make it a scalar
     pp.chi2 = float(pp.chi2)
@@ -149,3 +168,31 @@ def save(pp, output):
 
     with open(output, "w") as f:
         yaml.dump(ppdict, f, default_flow_style=False)
+
+def make_ppxf_table(vorfile, ppdir, keys, output, redo=False):
+    """ Produces a table with the ppxf results. """
+    if os.path.exists(output) and not redo:
+        return
+    yamls = sorted([_ for _ in os.listdir(ppdir) if _.endswith("yaml")])
+    data = []
+    for yfile in yamls:
+        with open(os.path.join(ppdir, yfile)) as f:
+            info = yaml.load(f)
+        d = []
+        for key in keys:
+            if key in info.keys():
+                d.append(info[key])
+            else:
+                d.append(np.nan)
+        data.append(d)
+    data = np.array(data)
+    newdata = Table(data, names=keys)
+    vordata = fits.getdata(vorfile, ext=0)
+    tabdata = Table.read(vorfile)
+    newtable = hstack([tabdata, newdata])
+    hvor = fits.getheader(vorfile)
+    vorHDU = fits.PrimaryHDU(vordata, header=hvor)
+    tabHDU = fits.BinTableHDU(newtable)
+    hdulist = fits.HDUList([vorHDU, tabHDU])
+    hdulist.writeto(output, overwrite=True)
+    return
