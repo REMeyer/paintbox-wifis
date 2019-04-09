@@ -25,16 +25,17 @@ from astropy.io import fits
 from astroquery.vizier import Vizier
 
 import context
-from make_voronoi import make_voronoi, combine_spectra
+from make_voronoi import make_voronoi, combine_spectra, add_wcs_to_voronoi
 from stdphot import stdphot, rebinstd
 from run_molecfit import run_molecfit
 from flux_calibration import apply_flux_calibration
 from prepare_templates import prepare_templates
-from run_ppxf import run_ppxf
+from run_ppxf import run_ppxf, make_ppxf_table
+from plot_maps import plot_from_voronoi
 
 if __name__ == "__main__":
     home_dir = os.path.join(context.data_dir, "WIFIS")
-    config_file = "sn40_mom2.yaml"
+    config_file = "sn60.yaml"
     # Setting up query of
     two_mass = Vizier(columns=["*", "+_r"])
     for gal in os.listdir(home_dir):
@@ -52,11 +53,13 @@ if __name__ == "__main__":
         # Producing Voronoi binning
         datacube = os.path.join(data_dir, params["datacube"])
         dataheader = os.path.join(data_dir, params["datacube"])
+        dataimg = os.path.join(data_dir, params["dataimg"])
         skycube = os.path.join(data_dir, params["skycube"])
         if not os.path.exists(outdir):
             os.mkdir(outdir)
         vorfile = os.path.join(outdir, "voronoi.fits")
         make_voronoi(datacube, params["vorSN"], vorfile, redo=False)
+        add_wcs_to_voronoi(vorfile, dataimg, redo=False)
         specs_dir = os.path.join(outdir, "combined")
         if not os.path.exists(specs_dir):
             os.mkdir(specs_dir)
@@ -125,4 +128,15 @@ if __name__ == "__main__":
         ppdir = os.path.join(outdir, "ppxf")
         if not os.path.exists(ppdir):
             os.mkdir(ppdir)
-        run_ppxf(specs, templates_file, params, ppdir)
+        run_ppxf(specs, templates_file, params, ppdir, redo=False)
+        table_keys = ["V_0", "Verr_0", "sigma_0", "sigmaerr_0", "sn", "wsky",
+                     "T", "Z"]
+        ppxf_table = os.path.join(outdir, "ppxf_results.fits")
+        make_ppxf_table(vorfile, ppdir, table_keys, ppxf_table, redo=True)
+        ########################################################################
+        # Plot results of pPXF
+        plot_keys = ["V_0", "sigma_0", "sn", "wsky", "T", "Z"]
+        plots_dir = os.path.join(outdir, "plots")
+        if not os.path.exists(plots_dir):
+            os.mkdir(plots_dir)
+        plot_from_voronoi(ppxf_table, plot_keys, plots_dir)
