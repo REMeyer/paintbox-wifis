@@ -21,46 +21,53 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import context
 
-def plot_map(table, vorimg, fields, outdir, lims=None, labels=None,
+def plot_from_voronoi(vorfile, fields, outdir, lims=None, labels=None,
              cmaps=None, wcs=None):
     """ Produces maps of properties in a given table using a Voronoi image."""
     lims = [[None, None]] * len(fields) if lims is None else lims
-    labels = [None] * len(fields) if labels is None else labels
+    labels = [_.replace("_", "") for _ in fields] if labels is None else labels
     cmaps = ["Spectral_r"] * len(fields) if cmaps is None else cmaps
-    if wcs is not None:
-        ydim, xdim = vorimg.shape
-        xpix = np.arange(xdim) + 1
-        ypix = np.arange(ydim) + 1
-        xx, yy = np.meshgrid(xpix, ypix)
-        coords = np.column_stack((xx.flatten(), yy.flatten()))
-        ra, dec = wcs.all_pix2world(coords, 1).T
-        ra = ra.reshape(vorimg.shape)
-        dec = dec.reshape(vorimg.shape)
-        ra0, dec0 = wcs.all_pix2world([[xdim / 2, ydim/2]], 1).T
-        ra = (ra - ra0) * 3600.
-        dec = (dec - dec0) * 3600.
+    vorimg = fits.getdata(vorfile, ext=0)
+    table = Table.read(vorfile)
+    h = fits.getheader(vorfile, ext=0)
+    wcs = WCS(h)
+    ydim, xdim = vorimg.shape
+    xpix = np.arange(xdim) + 1
+    ypix = np.arange(ydim) + 1
+    xx, yy = np.meshgrid(xpix, ypix)
+    coords = np.column_stack((xx.flatten(), yy.flatten()))
+    ra, dec = wcs.all_pix2world(coords, 1).T
+    ra = ra.reshape(vorimg.shape)
+    dec = dec.reshape(vorimg.shape)
+    ra0, dec0 = wcs.all_pix2world([[xdim / 2, ydim/2]], 1).T
+    ra = (ra - ra0) * 3600.
+    dec = (dec - dec0) * 3600.
     for i, field in enumerate(fields):
         img = np.zeros(vorimg.shape, dtype=np.float32) * np.nan
-        fig = plt.figure(figsize=(2.7, 4))
+        fig = plt.figure()
         ax = fig.add_subplot(111, aspect='equal')
         ax.minorticks_on()
+        vmin = lims[i][0]
+        vmax = lims[i][1]
+        vmin = np.percentile(table[field], 10) if vmin is None else vmin
+        vmax = np.percentile(table[field], 90) if vmax is None else vmax
         for t in table:
             idx = np.where(vorimg==t["binnum"])
             img[idx] = t[field]
         if wcs is None:
-            im = ax.imshow(img, origin="bottom", vmin=lims[i][0], vmax=lims[i][1],
+            im = ax.imshow(img, origin="bottom", vmin=vmin, vmax=vmax,
                            cmap=cmaps[i])
         else:
-            im = ax.pcolormesh(ra, dec, img, vmin=lims[i][0], vmax=lims[i][1],
+            im = ax.pcolormesh(ra, dec, img, vmin=vmin, vmax=vmax,
                            cmap=cmaps[i])
-        ax.set_xlabel("$\Delta$X (arcsec)")
-        ax.set_ylabel("$\Delta$Y (arcsec)")
+        ax.set_xlabel("$\Delta$RA (arcsec)")
+        ax.set_ylabel("$\Delta$DEC (arcsec)")
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         cbar = plt.colorbar(im, cax=cax)
         cbar.set_label(labels[i])
         plt.subplots_adjust(left=0.11, top=0.98, bottom=0.12, right=0.88)
-        plt.savefig(os.path.join(outdir, "{}.png".format(field)), dpi=300)
+        plt.savefig(os.path.join(outdir, "map_{}.png".format(field)), dpi=300)
     return
 
 
