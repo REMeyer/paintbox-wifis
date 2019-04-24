@@ -35,7 +35,8 @@ from plot_maps import plot_from_voronoi
 
 if __name__ == "__main__":
     home_dir = os.path.join(context.data_dir, "WIFIS")
-    config_file = "sn60.yaml"
+    config_file = "input0001.yaml"
+    config_file = "input0001.yaml"
     # Setting up query of
     two_mass = Vizier(columns=["*", "+_r"])
     for gal in os.listdir(home_dir):
@@ -59,7 +60,7 @@ if __name__ == "__main__":
             os.mkdir(outdir)
         vorfile = os.path.join(outdir, "voronoi.fits")
         make_voronoi(datacube, params["vorSN"], vorfile, redo=False)
-        add_wcs_to_voronoi(vorfile, dataimg, redo=False)
+        add_wcs_to_voronoi(vorfile, dataimg, redo=True)
         specs_dir = os.path.join(outdir, "combined")
         if not os.path.exists(specs_dir):
             os.mkdir(specs_dir)
@@ -74,7 +75,7 @@ if __name__ == "__main__":
         stdout = os.path.join(outdir, "{}.fits".format(
                               params["stdcube"].split("_")[0]))
         stdphot(stdcube, stdimg, stdout, r=params["tell_extract_radius"],
-                redo=True)
+                redo=False)
         # Rebin standard star spectrum to match that of the data cube
         specs = sorted(os.listdir(specs_dir))
         specs = [os.path.join(specs_dir, _) for _ in specs]

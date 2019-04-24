@@ -22,7 +22,7 @@ from vorbin.voronoi_2d_binning import voronoi_2d_binning
 
 import misc
 
-def make_voronoi(datacube, targetSN, output, redo=False):
+def make_voronoi(datacube, targetSN, output, redo=False, max_n_nans=500):
     """ Determination of SNR for each spaxel.
 
     Input parameters
@@ -50,7 +50,7 @@ def make_voronoi(datacube, targetSN, output, redo=False):
     xx, yy = np.meshgrid(np.arange(xdim), np.arange(ydim))
     # Selecting only spaxels where the percentage of nans is low
     nnans = np.isnan(data).sum(axis=0)
-    mask = np.where(nnans < 80, 0, 1)
+    mask = np.where(nnans < max_n_nans, 0, 1)
     # Preparing arrays for Voronoi binning
     idx = mask==0
     xpix = xx[idx] + 1
