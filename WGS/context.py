@@ -14,7 +14,7 @@ import astropy.units as u
 import matplotlib.pyplot as plt
 
 home_dir = os.path.expanduser("~")
-project_dir = os.path.join(home_dir, "Dropbox/spins")
+project_dir = os.path.join(home_dir, "Dropbox/WGS")
 molecfit_exec_dir = os.path.join(home_dir, "molecfit/bin")
 
 data_dir = os.path.join(project_dir, "data")

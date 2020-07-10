@@ -22,7 +22,8 @@ from vorbin.voronoi_2d_binning import voronoi_2d_binning
 
 import misc
 
-def make_voronoi(datacube, targetSN, output, redo=False, max_n_nans=500):
+def make_voronoi(datacube, dataimg, targetSN, output, redo=False, \
+                                                          max_n_nans=500):
     """ Determination of SNR for each spaxel.
 
     Input parameters
@@ -73,6 +74,8 @@ def make_voronoi(datacube, targetSN, output, redo=False, max_n_nans=500):
     tabHDU.header["EXTNAME"] = "TABLE"
     hdulist = fits.HDUList([vorHDU, tabHDU])
     hdulist.writeto(output, overwrite=True)
+    add_wcs_to_voronoi(output, dataimg)
+
 
 def combine_spectra(datacube, vorfile, outdir, redo=False, error=None,
                     init=None):
@@ -127,10 +130,8 @@ def combine_spectra(datacube, vorfile, outdir, redo=False, error=None,
     print("Done!")
     return
 
-def add_wcs_to_voronoi(vorfile, refimg, redo=False):
+def add_wcs_to_voronoi(vorfile, refimg):
     """ Adds the WCS information from a reference image to the voronoi file. """
-    if not redo:
-        return
     h = fits.getheader(refimg)
     wcs = WCS(h).to_header()
     hvor = fits.getheader(vorfile, ext=0)

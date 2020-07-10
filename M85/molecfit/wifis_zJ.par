@@ -197,11 +197,11 @@ pres: 790.0
 pres_key: ESO TEL AMBI PRES START
 
 # Ambient temperature in deg C
-temp: 12.5
+temp: 11.0
 temp_key: ESO TEL AMBI TEMP
 
 # Mirror temperature in deg C
-m1temp: 12.5
+m1temp: 11.0
 m1temp_key: none
 
 # Elevation above sea level in m (default is Paranal: 2635m)

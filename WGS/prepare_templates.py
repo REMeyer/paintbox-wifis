@@ -74,19 +74,17 @@ def prepare_templates(params, outfile, redo=False):
     newflux, logLam, velscale = util.log_rebin(wrange, spec,
                                                velscale=params["velscale"])
     ssps = np.zeros((len(filenames), len(newflux)))
-    norms = np.zeros(len(filenames))
     print("Processing SSP files")
     for i, fname in tqdm(enumerate(filenames)):
         spec = fits.getdata(fname)[idx]
         newflux, logLam, velscale = util.log_rebin(wrange, spec,
                                                    velscale=params["velscale"])
-        norm = np.nanmean(newflux)
-        ssps[i] = newflux / norm
-        norms[i] = norm
+        ssps[i] = newflux
+    norm = np.median(ssps)
+    ssps /= norm
     hdu1 = fits.PrimaryHDU(ssps)
     hdu1.header["EXTNAME"] = "SSPS"
-    norms = Table([norms], names=["norm"])
-    ssppars = hstack((ssppars, norms))
+    hdu1.header["BSCALE"] = (norm, "Scale to convert from ADU to flux.")
     hdu2 = fits.BinTableHDU(ssppars)
     hdu2.header["EXTNAME"] = "PARAMS"
     hdu1.header["CRVAL1"] = logLam[0]

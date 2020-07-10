@@ -32,7 +32,6 @@ def stdphot(cube, img, output, r=30, redo=False):
     mean, median, std = sigma_clipped_stats(data, sigma=3.0, iters=5)
     daofind = DAOStarFinder(fwhm=2.1, threshold=10.*std)
     star= daofind(data - median)
-    positions = [(star["xcentroid"][0], star["ycentroid"][0])]
     # Separating region inside aperture from the outside to determine sky
     ydim, xdim = data.shape
     X, Y = np.meshgrid(np.arange(xdim), np.arange(ydim))

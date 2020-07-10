@@ -18,7 +18,8 @@ from ppxf.ppxf import ppxf
 
 import misc
 
-def run_ppxf(specs, templates_file, config, outdir, redo=False):
+def run_ppxf(specs, templates_file, config, outdir, redo=False, mask=None,
+             plot=False):
     """ Run pPXF in all spectra. """
     velscale = config["velscale"]
     ssp_templates = fits.getdata(templates_file, extname="SSPS").T
@@ -40,6 +41,7 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False):
         afile = os.path.join(outdir, fname.replace(".fits", "_bestfit.fits"))
         ppfile = os.path.join(outdir, fname.replace(".fits", ".yaml"))
         imgfile = os.path.join(outdir, fname.replace(".fits", ".png"))
+        print(imgfile)
         if os.path.exists(ppfile) and not redo:
             continue
         # Reading the data in the files
@@ -93,15 +95,19 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False):
              constants.c.to("km/s").value
         components = np.zeros(nssps).astype(int)
         templates = ssp_templates
-        # templates = np.column_stack((ssp_templates, gas_templates))
-        # components = np.hstack((np.zeros(nssps), np.ones(ngas))).astype(np.int)
-        # gas_component = components > 0
         ########################################################################
+        # Applying mask
+        lam = np.exp(logLam)
+        goodpixels = np.arange(len(lam))
+        if mask is not None:
+            for w in mask:
+                goodpix = np.argwhere((lam <= w[0]) | (lam >= w[1])).ravel()
+                goodpixels = np.intersect1d(goodpixels, goodpix)
         pp0 = ppxf(templates, galaxy, noise, velscale=velscale,
                   plot=False, moments=config["nmoments"], start=start0,
-                  vsyst=dv, lam=np.exp(logLam), component=components,
+                  vsyst=dv, lam=lam, component=components,
                   degree=config["degree"], quiet=False, sky=sky,
-                  mdegree=config["mdegree"], clean=False)
+                  mdegree=config["mdegree"], clean=False, goodpixels=goodpixels)
         plt.clf()
         X = pp0.galaxy - pp0.bestfit
         medX = np.nanmedian(X)
@@ -112,7 +118,9 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False):
                   plot=True, moments=config["nmoments"], start=start0,
                   vsyst=dv, lam=np.exp(logLam), component=components,
                   degree=config["degree"], quiet=False, sky=sky,
-                  mdegree=config["mdegree"], clean=config["clean"])
+                  mdegree=config["mdegree"], clean=config["clean"],
+                  goodpixels = goodpixels)
+        plt.show()
         X = pp.galaxy - pp.bestfit
         medX = np.nanmedian(X)
         mad = np.median(np.abs(X - medX))
@@ -135,7 +143,10 @@ def run_ppxf(specs, templates_file, config, outdir, redo=False):
         pp.sn = float(sn.mean())
         pp.wsky = float(pp.weights[-1])
         # Saving the weights of the bestfit
-        wtable = hstack([params[params.colnames[:-1]], weights])
+        idx = Table([np.arange(len(weights))], names=["idx"])
+        wtable = hstack([idx, params[params.colnames[:-1]], weights])
+        i = np.argwhere(wtable["mass_weight"] > 0).ravel()
+        wtable = wtable[i]
         wtable.write(wfile, overwrite=True)
         #
         array_keys = ["lam", "galaxy", "noise", "bestfit", "mpoly", "apoly"]

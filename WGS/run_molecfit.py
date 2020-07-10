@@ -1,12 +1,8 @@
 # -*- coding: utf-8 -*-
-""" 
-
+"""
 Created on 04/04/19
-
 Author : Carlos Eduardo Barbosa
-
 Runs molecfit on SPINS data.
-
 """
 from __future__ import print_function, division
 
@@ -14,8 +10,6 @@ import os
 import shutil
 import yaml
 import subprocess
-
-import context
 
 def run_molecfit(params, outdir, redo=False):
     """ Runs molecfit. """
@@ -36,7 +30,6 @@ def run_molecfit(params, outdir, redo=False):
             config[key] = params[key]
     with open(config_file, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
-
     molecfit = os.path.join(context.molecfit_exec_dir, "molecfit")
     calctrans = os.path.join(context.molecfit_exec_dir, "calctrans")
     corrfilelist = os.path.join(context.molecfit_exec_dir, "corrfilelist")
@@ -48,3 +41,7 @@ def run_molecfit(params, outdir, redo=False):
         yaml.dump(config, f, default_flow_style=False)
     subprocess.run(["bash", corrfilelist, config_file])
     os.chdir(cwd)
+
+def example():
+    """ Example of how to run molecfit. """
+    pass

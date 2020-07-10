@@ -28,8 +28,8 @@ def plot_wifis_vel_resolution(mode=None):
     plt.style.use("seaborn-paper")
     plt.figure(1)
     plt.minorticks_on()
-    plt.plot(wave, velscale, "-")
-    # plt.xlabel("$\lambda$ ($\AA$)")
+    plt.plot(wave, fwhm.to(u.AA), "-")
+    plt.xlabel("$\lambda$ ($\AA$)")
     # plt.ylabel(r"Velocity scale - sigma (km/s)")
     plt.show()
 
