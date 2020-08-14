@@ -24,6 +24,7 @@ from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.table import Table
 from astroquery.vizier import Vizier
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from spectres import spectres
 try:
     import ppxf_util as util
@@ -38,8 +39,6 @@ from scipy import stats
 
 import context
 from paintbox import paintbox as pb
-
-import context
 
 def data_reduction_m85(redo=False):
     output = os.path.join(os.getcwd(), "M85_1D.fits")
@@ -81,7 +80,6 @@ def extract_spectrum(datacube, r=None, x0=44, y0=19, errcube=False):
     if len(data.shape) > 3:
         data = data[0]
     zdim, ydim, xdim = data.shape
-    hdr = fits.getheader(datacube)
     wcs = WCS(datacube)
     ps = (proj_plane_pixel_scales(wcs)[:2].mean() * u.degree).to(u.arcsec)
     aper = (r / ps).value
@@ -180,8 +178,8 @@ def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
     sens = np.poly1d(np.polyfit(wave, tflux / oflux, order))
     return sens
 
-def build_sed_model(wave, w1=8800, w2=13200, velscale=200, sample=None,
-                    fwhm=2.5, porder=30):
+def build_sed_model_emiles(wave, w1=8800, w2=13200, velscale=200, sample=None,
+                           fwhm=2.5, porder=30):
     """ Build model for NGC 3311"""
     # Preparing templates
     sample = "all" if sample is None else sample
@@ -204,8 +202,11 @@ def build_sed_model(wave, w1=8800, w2=13200, velscale=200, sample=None,
     stars = pb.Rebin(wave, pb.LOSVDConv(ssp * extinction, velscale=velscale))
     # Adding a polynomial
     poly = pb.Polynomial(wave, porder)
+    # Using Polynomial to make sky model
+    sky = pb.Polynomial(wave, 0)
+    sky.parnames = ["sky"]
     # Creating a model including LOSVD
-    sed = stars * poly
+    sed = stars * poly + sky
     # Setting properties that may be useful later in modeling
     sed.ssppars = limits
     sed.sspcolnames = params.colnames
@@ -239,11 +240,14 @@ def make_pymc3_model(flux, sed, loglike=None, fluxerr=None):
                 theta.append(Rv)
             elif param == "V":
                 # Stellar kinematics
-                V = pm.Normal("V", mu=3800., sd=50., testval=3805.)
+                V = pm.Normal("V", mu=729., sd=50., testval=729)
                 theta.append(V)
             elif param == "sigma":
-                sigma = pm.Uniform(param, lower=100, upper=500, testval=185.)
+                sigma = pm.Uniform(param, lower=100, upper=500, testval=170.)
                 theta.append(sigma)
+            elif param.startswith("sky"):
+                sky = pm.Normal(param, mu=0, sd=0.1, testval=0.)
+                theta.append(sky)
             # Polynomial parameters
             elif param == "p0":
                 p0 = pm.Normal("p0", mu=1, sd=0.1, testval=1.)
@@ -271,7 +275,7 @@ def run_emcee(flam, flamerr, sed, db, loglike="normal2"):
         pnames.append("S")
     if loglike == "studt":
         pnames.append("nu")
-    mcmc_db = db.replace("EMCEE", "MCMC").replace(".h5", "")
+    mcmc_db = os.path.join(os.getcwd(), "MCMC")
     trace = load_traces(mcmc_db, pnames)
     ndim = len(pnames)
     nwalkers = 2 * ndim
@@ -349,7 +353,7 @@ def plot_corner(trace, outroot, title=None, redo=False):
         s = "{0}$={1:.2f}^{{+{2:.2f}}}_{{-{3:.2f}}}$".format(
             labels[param], v[i], vuerr[i], vlerr[i])
         title.append(s)
-    fig, axs = plt.subplots(N, N, figsize=(context.fig_width, 3.5))
+    fig, axs = plt.subplots(N, N, figsize=(3.54, 3.5))
     grid = np.array(np.meshgrid(params, params)).reshape(2, -1).T
     for i, (p1, p2) in enumerate(grid):
         i1 = params.index(p1)
@@ -393,7 +397,6 @@ def plot_corner(trace, outroot, title=None, redo=False):
 
 def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None):
     outfig = "{}_fitting".format(db.replace(".h5", ""))
-    specnum = os.path.split(db)[1].replace(".h5", "").split("_")[-1]
     if os.path.exists("{}.png".format(outfig)) and not redo:
         return
     percs = np.linspace(5, 85, 9)
@@ -434,34 +437,30 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None):
                             figsize=(2 * context.fig_width, 3))
     ax = plt.subplot(axs[0])
     ax.plot(wave, flux, "-", c="0.8", lw=lw)
-    ax.plot(wave, flux - skymed, "-", label="Spectrum {}".format(specnum),
-            lw=lw)
+    ax.fill_between(wave, flux - fluxerr, flux + fluxerr, color="C0", alpha=0.7)
+    ax.plot(wave, flux - skymed, "-", label="M85", lw=lw)
     ax.plot(wave, y - skymed, "-", lw=lw, label="Model")
-    # for c, per in zip(colors, percs):
-    #     ax.fill_between(wave, np.percentile(spec, per, axis=0) - skymed,
-    #                      np.percentile(spec, per + 10, axis=0) - skymed,
-    #                     color=c)
-    # ax.errorbar(wave, y - skymed, fmt="-", mec="w", mew=0.4,
-    #             elinewidth=0.5, label="Model")
-
+    for c, per in zip(colors, percs):
+        ax.fill_between(wave, np.percentile(spec, per, axis=0) - skymed,
+                         np.percentile(spec, per + 10, axis=0) - skymed,
+                        color=c)
     ax.set_ylabel("Normalized flux")
     ax.xaxis.set_ticklabels([])
     ax.text(0.03, 0.88, "   ".join(summary), transform=ax.transAxes, fontsize=6)
     plt.legend()
-    ax.set_xlim(4700, 9400)
     ax = plt.subplot(axs[1])
-    # for c, per in zip(colors, percs):
-    #     ax.fill_between(wave,
-    #                     100 * (flux - np.percentile(spec, per, axis=0)) / flux,
-    #                     100 * (flux - np.percentile(spec, per + 10, axis=0)) /
-    #                     flux, color=c)
+    for c, per in zip(colors, percs):
+        ax.fill_between(wave,
+                        100 * (flux - np.percentile(spec, per, axis=0)) / flux,
+                        100 * (flux - np.percentile(spec, per + 10, axis=0)) /
+                        flux, color=c)
     rmse = np.std((flux - y)/flux)
     ax.plot(wave, 100 * (flux - y) / flux, "-", lw=lw, c="C1",
             label="RMSE={:.1f}\%".format(100 * rmse))
     ax.axhline(y=0, ls="--", c="k", lw=1, zorder=1000)
     ax.set_xlabel(r"$\lambda$ (\r{A})")
     ax.set_ylabel("Residue (\%)")
-    ax.set_xlim(4700, 9400)
+    ax.set_ylim(-5, 5)
     plt.legend()
     plt.subplots_adjust(left=0.065, right=0.995, hspace=0.02, top=0.99,
                         bottom=0.11)
@@ -498,13 +497,13 @@ def run_paintbox_m85(velscale=200, sample="all"):
     flux /= norm
     fluxerr /= norm
     print("Producing SED model...")
-    sed = build_sed_model(wave, sample=sample)
+    sed = build_sed_model_emiles(wave, sample=sample)
     print("Build pymc3 model")
     model = make_pymc3_model(flux, sed, fluxerr=fluxerr)
     mcmc_db = os.path.join(os.getcwd(), "MCMC")
     if not os.path.exists(mcmc_db):
         with model:
-            trace = pm.sample(draws=300, tune=300, step=pm.Metropolis())
+            trace = pm.sample(draws=500, tune=500, step=pm.Metropolis())
             pm.save_trace(trace, mcmc_db, overwrite=True)
     # Run second method using initial results from MH run
     emcee_db = os.path.join(os.getcwd(), "M85_emcee.h5")
@@ -517,10 +516,10 @@ def run_paintbox_m85(velscale=200, sample="all"):
     idx = [sed.parnames.index(p) for p in sed.sspcolnames]
     ptrace_emcee = Table(emcee_traces[:, idx], names=sed.sspcolnames)
     print("Producing corner plots...")
-    plot_corner(ptrace_emcee, emcee_db, title="M85")
+    plot_corner(ptrace_emcee, emcee_db, title="M85", redo=True)
     print("Producing fitting figure...")
     plot_fitting(wave, flux, fluxerr, sed, emcee_traces, emcee_db,
-                 redo=False)
+                 redo=True)
     print("Making summary table...")
     outtab = os.path.join(emcee_db.replace(".h5", "_results.fits"))
     summary_pars = sed.sspcolnames + ["Av", "V", "sigma"]
