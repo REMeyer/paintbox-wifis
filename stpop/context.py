@@ -18,9 +18,9 @@ import matplotlib.pyplot as plt
 
 
 if platform.node() == "kadu-Inspiron-5557":
-    home = "/home/kadu/Dropbox/WGS/"
+    home = "/home/kadu/Dropbox/SPINS/"
 elif platform.node() in ["uv100", "alphacrucis"]:
-    home = "/sto/home/cebarbosa/WGS/"
+    home = "/sto/home/cebarbosa/SPINS/"
 
 data_dir = os.path.join(home, "data")
 molecfit_exec_dir = os.path.join(home, "molecfit/bin")

@@ -529,10 +529,4 @@ def run_paintbox_m85(velscale=200, sample="all"):
 
 if __name__ == "__main__":
     wdir = os.path.join(context.home, "paintbox")
-    if not os.path.exists(wdir):
-        os.mkdir(wdir)
-    os.chdir(wdir)
-    data_reduction_m85()
-    run_molecfit_m85()
-    flux_calibration_m85()
     run_paintbox_m85()

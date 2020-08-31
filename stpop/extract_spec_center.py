@@ -136,14 +136,13 @@ def calc_dispersion(cube):
              hdr['CRPIX3']) * hdr['CDELT3'] + hdr['CRVAL3']) * u.m
     return wave
 
-def data_reduction(galaxy, scicube, tellcube, redo=False):
-    sci_extracted = os.path.join(extracted_dir, "{}_1D.fits".format(galaxy))
-    tell_extracted = os.path.join(extracted_dir, "{}_tell.fits".format(
-        galaxy))
+def data_reduction(galdir, scicube, tellcube, redo=False):
+    sci_extracted = os.path.join(galdir, "spec1D.fits")
+    tell_extracted = os.path.join(galdir, "tell1D.fits")
     if os.path.exists(sci_extracted) and not redo:
         return
-    wave = calc_dispersion(scicube).to(u.nm).value
-    wave_t = calc_dispersion(tellcube).to(u.nm).value
+    wave = calc_dispersion(scicube).to(u.micrometer).value
+    wave_t = calc_dispersion(tellcube).to(u.micrometer).value
     spec1d, spec1derr, aper = extract_max_sn_spectrum(scicube)
     spec1d_t, spec1derr_t, aper_t = extract_max_sn_spectrum(tellcube)
     # Select wavelength to work and resampling
@@ -152,12 +151,15 @@ def data_reduction(galaxy, scicube, tellcube, redo=False):
     wave = wave[idx]
     spec1d = spec1d[idx]
     spec1d_e = spec1derr[idx]
-    spec1d_t = spectres(wave, wave_t, spec1d_t)
+    spec1d[np.isnan(spec1d)] = 0
+    spec1d_t[np.isnan(spec1d_t)] = 0
+    spec1d_t = spectres(wave, wave_t, spec1d_t, fill=0.)
     # Saving results for science spectrum
     hdr = fits.getheader(scicube)
     hdr["APER"] = (aper.to(u.arcsec).value, "Aperture radius (arcsec)")
     hdu0 = fits.PrimaryHDU(header=hdr)
-    table = Table([wave * u.nm, spec1d, spec1d_e, np.zeros_like(wave)],
+    mask = np.where(spec1d==0, 0, 1)
+    table = Table([wave * u.micrometer, spec1d, spec1d_e, mask],
                   names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
     hdu1 = fits.BinTableHDU(table)
     hdulist = fits.HDUList([hdu0, hdu1])
@@ -166,27 +168,33 @@ def data_reduction(galaxy, scicube, tellcube, redo=False):
     hdr2 = fits.getheader(tellcube)
     hdr2["APER"] = (aper_t.to(u.arcsec).value, "Aperture radius (arcsec)")
     hdu0 = fits.PrimaryHDU(header=hdr2)
-    table = Table([wave * u.nm, spec1d_t, np.zeros_like(wave),
-                   np.zeros_like(wave)],
+    mask_t = np.where(spec1d_t == 0, 0, 1)
+    table = Table([wave * u.micrometer, spec1d_t, np.zeros_like(wave), mask_t],
                    names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
     hdu1 = fits.BinTableHDU(table)
     hdulist = fits.HDUList([hdu0, hdu1])
     hdulist.writeto(tell_extracted, overwrite=True)
     return
 
-def run_molecfit(galaxy, redo=False):
-    output = os.path.join(os.getcwd(), "molecfit/M85_1D_TAC.fits")
+def run_molecfit(wdir, redo=False):
+    cwd = os.getcwd()
+    os.chdir(wdir)
+    output = os.path.join(wdir, "spec1D_TAC.fits")
     if os.path.exists(output) and not redo:
         return
-    stdimg = os.path.join(context.data_dir, "HIP56736_combined_cubeImg_1.fits")
-    stdheader = fits.getheader(stdimg)
+    scifile = os.path.join(wdir, "spec1D.fits")
+    filelist = os.path.join(wdir, "filelist.txt")
+    with open(filelist, "w") as f:
+        f.write(scifile)
+    tellfile = os.path.join(wdir, "tell1D.fits")
+    stdheader = fits.getheader(tellfile)
     jd = float(stdheader["BARY_JD"])
     mjd = int(jd - 2400000.5)
     utc = datetime.strptime("12:19:32.5", "%H:%M:%S.%f")
     utc_seconds = utc.hour * 3600 + utc.minute * 60 + utc.second
     molecfit_params = {"user_workdir": os.getcwd(),
-                       "filename": "HIP56736_1D.fits",
-                       "listname": "filelist.txt",
+                       "filename": "tell1D.fits",
+                       "listname": filelist,
                        "obsdate": mjd, "utc": utc_seconds,
                        "telalt": stdheader["ELEVATIO"]}
     config_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
@@ -200,26 +208,37 @@ def run_molecfit(galaxy, redo=False):
     for key in molecfit_params.keys():
         if key in config.keys():
             config[key] = molecfit_params[key]
-    with open(config_file, "w") as f:
+    new_config_file = "wifis_zJ.par"
+    with open(new_config_file, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
-    subprocess.run(["bash", "/home/kadu/molecfit/bin/molecfit", config_file])
-    subprocess.run(["bash", "/home/kadu/molecfit/bin/calctrans", config_file])
+    subprocess.run(["bash", "/home/kadu/molecfit/bin/molecfit",
+                    new_config_file])
+    subprocess.run(["bash", "/home/kadu/molecfit/bin/calctrans",
+                    new_config_file])
     # Changing columns to apply corrfilelist
     config["columns"] = "WAVE FLUX FLUX_ERR MASK"
     with open(config_file, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
-    subprocess.run(["bash", "/home/kadu/molecfit/bin/corrfilelist", config_file])
+    subprocess.run(["bash", "/home/kadu/molecfit/bin/corrfilelist",
+                    config_file])
+    shutil.copy(os.path.join(wdir, "molecfit", "spec1D_TAC.fits"), output)
+    shutil.copy(os.path.join(wdir, "molecfit", "tell1D_TAC.fits"),
+                os.path.join(wdir, "tell1D_TAC.fits"))
+    os.chdir(cwd)
+    return
 
-def flux_calibration(redo=False):
-    output = os.path.join(os.getcwd(), "M85_sci.fits")
+def flux_calibration(galdir, redo=False):
+    output = os.path.join(os.getcwd(), "scispec.fits")
     if os.path.exists(output) and not redo:
         return
+    tellspec = os.path.join(galdir, "tell1D.fits")
+    star = fits.getval(tellspec, "OBJECT").strip()
     # Make flux calibration
     two_mass = Vizier(columns=["*", "+_r"])
-    std2mass = two_mass.query_object("HIP56736", catalog="II/246")[0][0]
+    std2mass = two_mass.query_object(star, catalog="II/246")[0][0]
     ref2mass = two_mass.query_object("Vega", catalog="II/246")[0][0]
     dmag = std2mass["Jmag"] - ref2mass["Jmag"]
-    observed = Table.read("HIP56736_1D_TAC.fits")
+    observed = Table.read("tell1D_TAC.fits")
     template = Table.read(os.path.join(context.data_dir,
                                        "rieke2008/table7.fits"))
     template.rename_column("lambda", "WAVE")
@@ -235,7 +254,7 @@ def flux_calibration(redo=False):
     sensfun = calc_sensitivity_function(observed["WAVE"], observed["tacflux"],
                             template["WAVE"], stdflux)
     # Applying sensitivity function to galaxy spectra
-    table = Table.read("M85_1D_TAC.fits")
+    table = Table.read("spec1D_TAC.fits")
     wave = table["WAVE"]
     newflux = table["tacflux"].data * sensfun(wave)
     newfluxerr = table["tacdflux"].data * sensfun(wave)
@@ -247,7 +266,6 @@ def flux_calibration(redo=False):
 def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
     """ Calculates the sensitivity function using a polynomial approximation.
     """
-
     # Setting the appropriate wavelength regime
     wmin = np.maximum(owave[1], twave[1])
     wmax = np.minimum(owave[-2],twave[-2])
@@ -256,6 +274,8 @@ def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
     # Rebinning and normalizing spectra
     oflux = spectres(wave, owave, oflux)
     tflux = spectres(wave, twave, tflux)
+    plt.plot(wave, tflux / oflux)
+    plt.show()
     sens = np.poly1d(np.polyfit(wave, tflux / oflux, order))
     return sens
 
@@ -263,21 +283,21 @@ def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
 if __name__ == "__main__":
     ps = 0.53884 * u.arcsec
     data_dir = os.path.join(context.data_dir, "WIFIS")
-    wdir = os.path.join(context.home, "center_imfs")
-    extracted_dir = os.path.join(wdir, "extracted")
-    for _dir in [wdir, extracted_dir]:
-        if not os.path.exists(_dir):
-            os.mkdir(_dir)
+    home_dir = os.path.join(context.home, "center_imfs")
+    if not os.path.exists(home_dir):
+        os.mkdir(home_dir)
     galaxies = os.listdir(data_dir)
     apertures = np.arange(1, 8, 0.5)
     for galaxy in galaxies:
         print(galaxy)
-        galdir = os.path.join(data_dir, galaxy)
+        galdir = os.path.join(home_dir, galaxy)
+        if not os.path.exists(galdir):
+            os.mkdir(galdir)
+        cube_dir = os.path.join(data_dir, galaxy)
         n = "2" if galaxy == "M85" else "1"
-        scicube = os.path.join(galdir, "{}_combined_cube_{}.fits".format(
+        scicube = os.path.join(cube_dir, "{}_combined_cube_{}.fits".format(
                                 galaxy, n))
         tellcube = os.path.join(data_dir, "M85/HIP56736_combined_cube_1.fits")
-        data_reduction(galaxy, scicube, tellcube)
-        # run_molecfit(galaxy)
-        # flux_calibration()
-        # run_paintbox()
+        data_reduction(galdir, scicube, tellcube)
+        run_molecfit(galdir)
+        flux_calibration(galdir, redo=True)
