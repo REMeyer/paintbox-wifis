@@ -91,7 +91,7 @@ def prepare_response_functions(data_dir, wave, out, redo=False):
                 cols = [(i,f) for i, f in enumerate(fields) if f.startswith(
                     name)]
                 for i, col in cols:
-                    val = float(col.split(sign)[1])
+                    val = float("{}1".format(sign)) * float(col.split(sign)[1])
                     t = Table([[Z], [T], [val]], names=["Z", "Age", element])
                     params.append(t)
                     rf = data[:, i] / fsun

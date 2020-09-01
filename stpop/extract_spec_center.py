@@ -25,18 +25,11 @@ from astropy.stats import sigma_clipped_stats
 from photutils import find_peaks
 from astroquery.vizier import Vizier
 import matplotlib.pyplot as plt
-from matplotlib import cm
 from spectres import spectres
 try:
     import ppxf_util as util
 except:
     import ppxf.ppxf_util as util
-import pymc3 as pm
-import theano.tensor as tt
-from tqdm import tqdm
-import seaborn as sns
-import emcee
-from scipy import stats
 
 import context
 
@@ -239,6 +232,8 @@ def flux_calibration(galdir, redo=False):
     ref2mass = two_mass.query_object("Vega", catalog="II/246")[0][0]
     dmag = std2mass["Jmag"] - ref2mass["Jmag"]
     observed = Table.read("tell1D_TAC.fits")
+    idx = np.where(observed["tacflux"] > 0)[0]
+    observed = observed[idx]
     template = Table.read(os.path.join(context.data_dir,
                                        "rieke2008/table7.fits"))
     template.rename_column("lambda", "WAVE")
@@ -274,8 +269,6 @@ def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
     # Rebinning and normalizing spectra
     oflux = spectres(wave, owave, oflux)
     tflux = spectres(wave, twave, tflux)
-    plt.plot(wave, tflux / oflux)
-    plt.show()
     sens = np.poly1d(np.polyfit(wave, tflux / oflux, order))
     return sens
 

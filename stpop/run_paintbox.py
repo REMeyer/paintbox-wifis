@@ -10,19 +10,12 @@ Run paintbox in the central part of M85 using WIFIS data.
 """
 
 import os
-import shutil
-import yaml
-from datetime import datetime
-import subprocess
 import copy
 
 import numpy as np
 from astropy.io import fits
 import astropy.units as u
-from astropy.wcs import WCS
-from astropy.wcs.utils import proj_plane_pixel_scales
 from astropy.table import Table
-from astroquery.vizier import Vizier
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from spectres import spectres
@@ -38,145 +31,71 @@ import emcee
 from scipy import stats
 
 import context
-from paintbox import paintbox as pb
+import paintbox as pb
 
-def data_reduction_m85(redo=False):
-    output = os.path.join(os.getcwd(), "M85_1D.fits")
-    if os.path.exists(output) and not redo:
-        return
-    datacube = os.path.join(context.data_dir, "M85_combined_cube_2.fits")
-    datacube_err = os.path.join(context.data_dir, "M85_unc_cube.fits")
-    datacube_t = os.path.join(context.data_dir,
-                              "HIP56736_combined_cube_1.fits")
-    hdr = fits.getheader(datacube)
-    wave = ((np.arange(hdr['NAXIS3']) + 1 - hdr['CRPIX3']) * hdr['CDELT3'] + \
-            hdr['CRVAL3']) * u.m
-    hdr_t = fits.getheader(datacube_t)
-    wave_t = ((np.arange(hdr_t['NAXIS3']) + 1 - hdr_t['CRPIX3']) * hdr_t[
-        'CDELT3'] + hdr_t['CRVAL3']) * u.m
-    wave = wave.to(u.micrometer).value
-    wave_t = wave_t.to(u.micrometer).value
-    spec1d = extract_spectrum(datacube)
-    spec1d_e = extract_spectrum(datacube_err, errcube=True)
-    spec1d_t = extract_spectrum(datacube_t)
-    # Select wavelength to work
-    w = np.where(np.isfinite(spec1d * spec1d_e), wave, np.nan)
-    idx = np.where((wave >= np.nanmin(w)) & (wave <= np.nanmax(w)))[0]
-    wave = wave[idx]
-    spec1d = spec1d[idx]
-    spec1d_e = spec1d_e[idx]
-    spec1d_t = spectres(wave, wave_t, spec1d_t)
-    table = Table([wave, spec1d, spec1d_e, np.zeros_like(wave)],
-                  names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
-    table.write("M85_1D.fits", overwrite=True)
-    table = Table([wave, spec1d_t, np.zeros_like(wave), np.zeros_like(wave)],
-                  names=["WAVE", "FLUX", "FLUX_ERR", "MASK"])
-    table.write("HIP56736_1D.fits", overwrite=True)
-    return
+class CvDCaller():
+    def __init__(self, sed):
+        self.sed = sed
+        self.parnames = list(dict.fromkeys(sed.parnames))
+        self.wave = self.sed.wave
+        self.nparams = len(self.parnames)
+        self._shape = len(self.sed.parnames)
+        self._idxs = {}
+        for param in self.parnames:
+            self._idxs[param] = np.where(np.array(self.sed.parnames) == param)[0]
 
-def extract_spectrum(datacube, r=None, x0=44, y0=19, errcube=False):
-    r = 2 * u.arcsec if r is None else r
-    data = fits.getdata(datacube)
-    if len(data.shape) > 3:
-        data = data[0]
-    zdim, ydim, xdim = data.shape
-    wcs = WCS(datacube)
-    ps = (proj_plane_pixel_scales(wcs)[:2].mean() * u.degree).to(u.arcsec)
-    aper = (r / ps).value
-    X, Y = np.meshgrid(np.arange(xdim), np.arange(ydim))
-    R = np.sqrt((X - x0)**2 + (Y - y0)**2)
-    idx = np.where(R <= aper)
-    specs = data[:, idx[0], idx[1]]
-    if errcube:
-        spec1D = np.sqrt(np.nanmean(specs**2, axis=1))
-    else:
-        spec1D = np.nanmean(specs, axis=1)
-    return spec1D
+    def __call__(self, theta):
+        t = np.zeros(self._shape)
+        for param, val in zip(self.parnames, theta):
+            t[self._idxs[param]] = val
+        return self.sed(t)
 
-def run_molecfit_m85(redo=False):
-    output = os.path.join(os.getcwd(), "molecfit/M85_1D_TAC.fits")
-    if os.path.exists(output) and not redo:
-        return
-    stdimg = os.path.join(context.data_dir, "HIP56736_combined_cubeImg_1.fits")
-    stdheader = fits.getheader(stdimg)
-    jd = float(stdheader["BARY_JD"])
-    mjd = int(jd - 2400000.5)
-    utc = datetime.strptime("12:19:32.5", "%H:%M:%S.%f")
-    utc_seconds = utc.hour * 3600 + utc.minute * 60 + utc.second
-    molecfit_params = {"user_workdir": os.getcwd(),
-                       "filename": "HIP56736_1D.fits",
-                       "listname": "filelist.txt",
-                       "obsdate": mjd, "utc": utc_seconds,
-                       "telalt": stdheader["ELEVATIO"]}
-    config_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                              "molecfit")
-    # Copying default parameter files
-    for fname in os.listdir(config_path):
-        shutil.copy(os.path.join(config_path, fname), os.getcwd())
-    config_file = os.path.join(os.getcwd(), "wifis_zJ.par")
-    with open(config_file) as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-    for key in molecfit_params.keys():
-        if key in config.keys():
-            config[key] = molecfit_params[key]
-    with open(config_file, "w") as f:
-        yaml.dump(config, f, default_flow_style=False)
-    subprocess.run(["bash", "/home/kadu/molecfit/bin/molecfit", config_file])
-    subprocess.run(["bash", "/home/kadu/molecfit/bin/calctrans", config_file])
-    # Changing columns to apply corrfilelist
-    config["columns"] = "WAVE FLUX FLUX_ERR MASK"
-    with open(config_file, "w") as f:
-        yaml.dump(config, f, default_flow_style=False)
-    subprocess.run(["bash", "/home/kadu/molecfit/bin/corrfilelist", config_file])
-
-def flux_calibration_m85(redo=False):
-    output = os.path.join(os.getcwd(), "M85_sci.fits")
-    if os.path.exists(output) and not redo:
-        return
-    # Make flux calibration
-    two_mass = Vizier(columns=["*", "+_r"])
-    std2mass = two_mass.query_object("HIP56736", catalog="II/246")[0][0]
-    ref2mass = two_mass.query_object("Vega", catalog="II/246")[0][0]
-    dmag = std2mass["Jmag"] - ref2mass["Jmag"]
-    observed = Table.read("HIP56736_1D_TAC.fits")
-    template = Table.read(os.path.join(context.data_dir,
-                                       "rieke2008/table7.fits"))
-    template.rename_column("lambda", "WAVE")
-    template.rename_column("Vega", "FLUX")
-    # Cropping template in wavelength
-    idx = np.where((template["WAVE"] >= observed["WAVE"].min()) &
-                    (template["WAVE"] <= observed["WAVE"].max()))
-    template = template[idx]
-    ############################################################################
-    # Scaling the flux of Vega to that of the standard star
-    stdflux = template["FLUX"] * np.power(10, -0.4 * dmag)
-    # Determining the sensitivity function
-    sensfun = calc_sensitivity_function(observed["WAVE"], observed["tacflux"],
-                            template["WAVE"], stdflux)
-    # Applying sensitivity function to galaxy spectra
-    table = Table.read("M85_1D_TAC.fits")
-    wave = table["WAVE"]
-    newflux = table["tacflux"].data * sensfun(wave)
-    newfluxerr = table["tacdflux"].data * sensfun(wave)
-    newtable = Table([wave, newflux, newfluxerr], names=["WAVE", "FLUX",
-                                                         "FLUX_ERR"])
-    newtable.write(output, overwrite=True)
-    return
-
-def calc_sensitivity_function(owave, oflux, twave, tflux, order=30):
-    """ Calculates the sensitivity function using a polynomial approximation.
-    """
-
-    # Setting the appropriate wavelength regime
-    wmin = np.maximum(owave[1], twave[1])
-    wmax = np.minimum(owave[-2],twave[-2])
-    dw = 0.1 * np.minimum(owave[1] - owave[0], twave[1] - twave[0])
-    wave = np.arange(wmin, wmax, dw)
-    # Rebinning and normalizing spectra
-    oflux = spectres(wave, owave, oflux)
-    tflux = spectres(wave, twave, tflux)
-    sens = np.poly1d(np.polyfit(wave, tflux / oflux, order))
-    return sens
+def build_sed_CvD(wave, velscale=200, porder=45, elements=None):
+    wdir = os.path.join(context.home, "templates")
+    elements = ["C", "N", "Na", "Mg", "Si", "Ca", "Ti", "Fe", "K"] if \
+                elements is None else elements
+    ssp_file = os.path.join(context.home,
+                            "templates/VCJ17_varydoublex_wifis.fits")
+    templates = fits.getdata(ssp_file, ext=0)
+    tnorm = np.median(templates, axis=1)
+    templates /= tnorm[:, None]
+    params = Table.read(ssp_file, hdu=1)
+    twave = Table.read(ssp_file, hdu=2)["wave"].data
+    limits = {}
+    for i, param in enumerate(params.colnames):
+        vmin, vmax = params[param].min(), params[param].max()
+        limits[param] = (vmin, vmax)
+    ssp = pb.StPopInterp(twave, params, templates)
+    ssppars = params.colnames + ["Na"]
+    for element in elements:
+        print(element)
+        elem_file = os.path.join(wdir, "C18_rfs_wifis_{}.fits".format(element))
+        rfdata = fits.getdata(elem_file, ext=0)
+        rfpar = Table.read(elem_file, hdu=1)
+        vmin, vmax = rfpar[element].min(), rfpar[element].max()
+        limits[element] = (vmin, vmax)
+        ewave = Table.read(elem_file, hdu=2)["wave"].data
+        rf = pb.StPopInterp(ewave, rfpar, rfdata)
+        ssp = ssp * rf
+    # Adding extinction to the stellar populations
+    extinction = pb.CCM89(twave)
+    stars = pb.Rebin(wave, pb.LOSVDConv(ssp * extinction, velscale=velscale))
+    # Adding a polynomial
+    poly = pb.Polynomial(wave, porder)
+    # Using Polynomial to make sky model
+    sky = pb.Polynomial(wave, 0)
+    sky.parnames = ["sky"]
+    # Creating a model including LOSVD
+    sed = stars * poly + sky
+    sed = CvDCaller(sed)
+    theta = np.array([0, 10, 2., 2., 0, 0, 0, 0, 0.1, 3.8, 200, 729, 1])
+    theta = np.hstack([theta, np.zeros(31)])
+    # Setting properties that may be useful later in modeling
+    sed.ssppars = limits
+    sed.sspcolnames = ssppars
+    sed.sspparams = params
+    sed.porder = porder
+    return sed
 
 def build_sed_model_emiles(wave, w1=8800, w2=13200, velscale=200, sample=None,
                            fwhm=2.5, porder=30):
@@ -220,66 +139,66 @@ def make_pymc3_model(flux, sed, loglike=None, fluxerr=None):
     fluxerr = np.ones_like(flux) if fluxerr is None else fluxerr
     model = pm.Model()
     polynames = ["p{}".format(i + 1) for i in range(sed.porder)]
+    params = np.unique(sed.parnames)
     with model:
-        theta = []
-        for param in sed.parnames:
+        vars = {}
+        for param in np.unique(sed.parnames):
             # Stellar population parameters
             if param in sed.ssppars:
                 vmin, vmax = sed.ssppars[param]
                 vinit = float(0.5 * (vmin + vmax))
                 v = pm.Uniform(param, lower=float(vmin), upper=float(vmax),
                                testval=vinit)
-                theta.append(v)
+                vars[param] = v
             # Dust attenuation parameters
             elif param == "Av":
-                Av = pm.Exponential("Av", lam=1 / 0.4, testval=0.1)
-                theta.append(Av)
+                v = pm.Exponential("Av", lam=1 / 0.4, testval=0.1)
             elif param == "Rv":
                 BNormal = pm.Bound(pm.Normal, lower=0)
-                Rv = BNormal("Rv", mu=3.1, sd=1., testval=3.1)
-                theta.append(Rv)
+                v = BNormal("Rv", mu=3.1, sd=1., testval=3.1)
             elif param == "V":
                 # Stellar kinematics
-                V = pm.Normal("V", mu=729., sd=50., testval=729)
-                theta.append(V)
+                v= pm.Normal("V", mu=729., sd=50., testval=729)
             elif param == "sigma":
-                sigma = pm.Uniform(param, lower=100, upper=500, testval=170.)
-                theta.append(sigma)
+                v = pm.Uniform(param, lower=100, upper=500, testval=170.)
             elif param.startswith("sky"):
-                sky = pm.Normal(param, mu=0, sd=0.1, testval=0.)
-                theta.append(sky)
+                v = pm.Normal(param, mu=0, sd=0.1, testval=0.)
             # Polynomial parameters
             elif param == "p0":
-                p0 = pm.Normal("p0", mu=1, sd=0.1, testval=1.)
-                theta.append(p0)
+                v = pm.Normal("p0", mu=1, sd=0.1, testval=1.)
             elif param in polynames:
-                pn = pm.Normal(param, mu=0, sd=0.01, testval=0.)
-                theta.append(pn)
+                v = pm.Normal(param, mu=0, sd=0.01, testval=0.)
+            else:
+                print("Parameter not found: ". param)
+            vars[param] = v
+        theta = []
+        for param in sed.parnames:
+            theta.append(vars[param])
         if loglike == "studt":
             nu = pm.Uniform("nu", lower=2.01, upper=50, testval=10.)
             theta.append(nu)
         if loglike == "normal2":
-            x = pm.Normal("x", mu=0, sd=1, testval=0.)
-            s = pm.Deterministic("S", 1. + pm.math.exp(x))
+            x = pm.Normal("n2exp", mu=0, sd=1, testval=0.)
+            s = pm.Deterministic("infl", 1. + pm.math.exp(x))
             theta.append(s)
+            loglike = pb.Normal2LogLike(flux, sed, obserr=fluxerr)
         theta = tt.as_tensor_variable(theta).T
-        logl = pb.TheanoLogLikeInterface(flux, sed, loglike=loglike,
-                                          obserr=fluxerr)
-        pm.DensityDist('loglike', lambda v: logl(v),
+
+        py3loglike = pb.TheanoLogLikeInterface(loglike)
+        pm.DensityDist('loglike', lambda v: py3loglike(v),
                        observed={'v': theta})
     return model
 
-def run_emcee(flam, flamerr, sed, db, loglike="normal2"):
+def run_emcee(flam, flamerr, sed, db, loglike="normal2", model="CvD"):
     pnames = copy.deepcopy(sed.parnames)
     if loglike == "normal2":
-        pnames.append("S")
+        pnames.append("infl")
     if loglike == "studt":
         pnames.append("nu")
-    mcmc_db = os.path.join(os.getcwd(), "MCMC")
+    mcmc_db = os.path.join(os.getcwd(), "MCMC_{}".format(model))
     trace = load_traces(mcmc_db, pnames)
     ndim = len(pnames)
     nwalkers = 2 * ndim
-    polynames = ["p{}".format(i+1) for i in range(sed.porder)]
     pos = np.zeros((nwalkers, ndim))
     priors = []
     for i, param in enumerate(pnames):
@@ -310,7 +229,7 @@ def run_emcee(flam, flamerr, sed, db, loglike="normal2"):
     backend.reset(nwalkers, ndim)
     sampler = emcee.EnsembleSampler(nwalkers, ndim, log_probability,
                                     backend=backend)
-    sampler.run_mcmc(pos, 1000, progress=True)
+    sampler.run_mcmc(pos, 1500, progress=True)
     return
 
 def load_traces(db, params):
@@ -334,12 +253,11 @@ def load_traces(db, params):
     return traces
 
 def plot_corner(trace, outroot, title=None, redo=False):
+    global labels
     title = "" if title is None else title
     output = "{}_corner.png".format(outroot)
     if os.path.exists(output) and not redo:
         return
-    labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
-              "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]"}
     N = len(trace.colnames)
     params = trace.colnames
     data = np.stack([trace[p] for p in params]).T
@@ -419,15 +337,18 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None):
     plt.plot(llike)
     plt.savefig("{}_loglike.png".format(db))
     plt.close(fig)
-    sspdict = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age",
-               "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]"}
+    labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
+              "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]",
+              "Age": "Age (Gyr)", "x1": "$x_1$", "x2": "$x_2$",
+              "Ca": "[Ca/Fe]", "Fe": "[Fe/H]", "Na": "[Na/Fe]",
+              "K": "[K/Fe]"}
     summary = []
     for i, param in enumerate(sed.ssppars):
         t = traces[:,i]
         m = np.median(t)
         lowerr = m - np.percentile(t, 16)
         uperr = np.percentile(t, 84) - m
-        s = "{}=${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}$".format(sspdict[param], m,
+        s = "{}=${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}$".format(labels[param], m,
                                                        uperr, lowerr)
         summary.append(s)
     lw=1
@@ -483,12 +404,12 @@ def make_table(trace, outtab):
     return tab
 
 
-def run_paintbox_m85(velscale=200, sample="all"):
+def run_paintbox(velscale=200, ssp_model="CvD", sample_emiles="all"):
     # Read first spectrum to set the dispersion
-    data = Table.read("M85_sci.fits")
+    data = Table.read("scispec.fits")
     flux = data["FLUX"].data
     fluxerr = data["FLUX_ERR"].data
-    wave_lin = (data["WAVE"] * u.micrometer).to(u.AA).value
+    wave_lin = (data["WAVE"]).to(u.AA).value
     _, logwave, velscale = util.log_rebin([wave_lin[0], wave_lin[-1]],
                                            data["FLUX"], velscale=velscale)
     wave = np.exp(logwave)[1:-1]
@@ -497,22 +418,26 @@ def run_paintbox_m85(velscale=200, sample="all"):
     flux /= norm
     fluxerr /= norm
     print("Producing SED model...")
-    sed = build_sed_model_emiles(wave, sample=sample)
+    if ssp_model == "CvD":
+        sed = build_sed_CvD(wave)
+    elif ssp_model == "emiles":
+        sed = build_sed_model_emiles(wave, sample=sample_emiles)
     print("Build pymc3 model")
     model = make_pymc3_model(flux, sed, fluxerr=fluxerr)
-    mcmc_db = os.path.join(os.getcwd(), "MCMC")
+    mcmc_db = os.path.join(os.getcwd(), "MCMC_{}".format(ssp_model))
     if not os.path.exists(mcmc_db):
         with model:
             trace = pm.sample(draws=500, tune=500, step=pm.Metropolis())
             pm.save_trace(trace, mcmc_db, overwrite=True)
     # Run second method using initial results from MH run
-    emcee_db = os.path.join(os.getcwd(), "M85_emcee.h5")
+    emcee_db = os.path.join(os.getcwd(), "emcee_{}.h5".format(ssp_model))
     if not os.path.exists(emcee_db):
         print("Running EMCEE...")
         run_emcee(flux, fluxerr, sed, emcee_db)
     reader = emcee.backends.HDFBackend(emcee_db)
     samples = reader.get_chain(discard=500, flat=True, thin=100)
     emcee_traces = samples[:, :len(sed.parnames)]
+    print(sed.sspcolnames)
     idx = [sed.parnames.index(p) for p in sed.sspcolnames]
     ptrace_emcee = Table(emcee_traces[:, idx], names=sed.sspcolnames)
     print("Producing corner plots...")
@@ -528,5 +453,15 @@ def run_paintbox_m85(velscale=200, sample="all"):
     make_table(summary_trace, outtab)
 
 if __name__ == "__main__":
-    wdir = os.path.join(context.home, "paintbox")
-    run_paintbox_m85()
+    labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
+              "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]",
+              "Age": "Age (Gyr)", "x1": "$x_1$", "x2": "$x_2$",
+              "Ca": "[Ca/Fe]", "Fe": "[Fe/H]", "Na": "[Na/Fe]",
+              "K": "[K/Fe]", "C": "[C/Fe]"}
+    wdir = os.path.join(context.home, "center_imfs")
+    sample = os.listdir(wdir)[::-1]
+    for galaxy in sample:
+        galdir = os.path.join(wdir, galaxy)
+        os.chdir(galdir)
+        run_paintbox(ssp_model="CvD")
+        break
