@@ -224,14 +224,14 @@ def flux_calibration(galdir, redo=False):
     output = os.path.join(os.getcwd(), "scispec.fits")
     if os.path.exists(output) and not redo:
         return
-    tellspec = os.path.join(galdir, "tell1D.fits")
+    tellspec = os.path.join(galdir, "tell1D_TAC.fits")
     star = fits.getval(tellspec, "OBJECT").strip()
     # Make flux calibration
     two_mass = Vizier(columns=["*", "+_r"])
     std2mass = two_mass.query_object(star, catalog="II/246")[0][0]
     ref2mass = two_mass.query_object("Vega", catalog="II/246")[0][0]
     dmag = std2mass["Jmag"] - ref2mass["Jmag"]
-    observed = Table.read("tell1D_TAC.fits")
+    observed = Table.read(tellspec)
     idx = np.where(observed["tacflux"] > 0)[0]
     observed = observed[idx]
     template = Table.read(os.path.join(context.data_dir,
@@ -249,7 +249,7 @@ def flux_calibration(galdir, redo=False):
     sensfun = calc_sensitivity_function(observed["WAVE"], observed["tacflux"],
                             template["WAVE"], stdflux)
     # Applying sensitivity function to galaxy spectra
-    table = Table.read("spec1D_TAC.fits")
+    table = Table.read(os.path.join(galdir, "spec1D_TAC.fits"))
     wave = table["WAVE"]
     newflux = table["tacflux"].data * sensfun(wave)
     newfluxerr = table["tacdflux"].data * sensfun(wave)
@@ -280,7 +280,7 @@ if __name__ == "__main__":
     if not os.path.exists(home_dir):
         os.mkdir(home_dir)
     galaxies = os.listdir(data_dir)
-    apertures = np.arange(1, 8, 0.5)
+    apertures = np.array([5,])
     for galaxy in galaxies:
         print(galaxy)
         galdir = os.path.join(home_dir, galaxy)

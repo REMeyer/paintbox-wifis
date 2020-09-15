@@ -29,6 +29,7 @@ from tqdm import tqdm
 import seaborn as sns
 import emcee
 from scipy import stats
+from scipy.interpolate import interp1d
 
 import context
 import paintbox as pb
@@ -78,8 +79,7 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None):
         rf = pb.StPopInterp(ewave, rfpar, rfdata)
         ssp = ssp * rf
     # Adding extinction to the stellar populations
-    extinction = pb.CCM89(twave)
-    stars = pb.Rebin(wave, pb.LOSVDConv(ssp * extinction, velscale=velscale))
+    stars = pb.Rebin(wave, pb.LOSVDConv(ssp, velscale=velscale))
     # Adding a polynomial
     poly = pb.Polynomial(wave, porder)
     # Using Polynomial to make sky model
@@ -165,9 +165,9 @@ def make_pymc3_model(flux, sed, loglike=None, fluxerr=None):
                 v = pm.Normal(param, mu=0, sd=0.1, testval=0.)
             # Polynomial parameters
             elif param == "p0":
-                v = pm.Normal("p0", mu=1, sd=0.1, testval=1.)
+                v = pm.Normal("p0", mu=1, sd=0.5, testval=1.)
             elif param in polynames:
-                v = pm.Normal(param, mu=0, sd=0.01, testval=0.)
+                v = pm.Normal(param, mu=0, sd=0.5, testval=0.)
             else:
                 print("Parameter not found: ". param)
             vars[param] = v
@@ -404,19 +404,26 @@ def make_table(trace, outtab):
     return tab
 
 
-def run_paintbox(velscale=200, ssp_model="CvD", sample_emiles="all"):
+def run_paintbox(cubename, velscale=200, ssp_model="CvD", sample_emiles="all"):
     # Read first spectrum to set the dispersion
-    data = Table.read("scispec.fits")
-    flux = data["FLUX"].data
-    fluxerr = data["FLUX_ERR"].data
-    wave_lin = (data["WAVE"]).to(u.AA).value
+    flux = fits.getdata(cubename, ext=0)
+    wave_lin = fits.getdata(cubename, ext=1)
+    fluxerr = fits.getdata(cubename, ext=2)
+    idx = np.where(np.isnan(flux), False, True)
+    flux_interp = interp1d(wave_lin[idx], flux[idx], bounds_error=False,
+                           fill_value=0)
+    fluxerr_interp = interp1d(wave_lin[idx], fluxerr[idx], bounds_error=False,
+                              fill_value=0)
+    # Rebinning data
     _, logwave, velscale = util.log_rebin([wave_lin[0], wave_lin[-1]],
-                                           data["FLUX"], velscale=velscale)
-    wave = np.exp(logwave)[1:-1]
-    flux, fluxerr = spectres(wave, wave_lin, flux, spec_errs=fluxerr)
+                                           flux, velscale=velscale)
+    wave = np.exp(logwave)[20:-20]
+    flux, fluxerr = spectres(wave, wave_lin, flux_interp(wave_lin),
+                             spec_errs=fluxerr_interp(wave_lin))
     norm = np.median(flux)
     flux /= norm
     fluxerr /= norm
+    rname = cubename.split("_")[-1].split(".")[0]
     print("Producing SED model...")
     if ssp_model == "CvD":
         sed = build_sed_CvD(wave)
@@ -424,13 +431,14 @@ def run_paintbox(velscale=200, ssp_model="CvD", sample_emiles="all"):
         sed = build_sed_model_emiles(wave, sample=sample_emiles)
     print("Build pymc3 model")
     model = make_pymc3_model(flux, sed, fluxerr=fluxerr)
-    mcmc_db = os.path.join(os.getcwd(), "MCMC_{}".format(ssp_model))
+    mcmc_db = os.path.join(os.getcwd(), "MCMC_{}_{}".format(ssp_model, rname))
     if not os.path.exists(mcmc_db):
         with model:
             trace = pm.sample(step=pm.Metropolis())
             pm.save_trace(trace, mcmc_db, overwrite=True)
     # Run second method using initial results from MH run
-    emcee_db = os.path.join(os.getcwd(), "emcee_{}.h5".format(ssp_model))
+    emcee_db = os.path.join(os.getcwd(), "emcee_{}_{}.h5".format(ssp_model,
+                                                                 rname))
     if not os.path.exists(emcee_db):
         print("Running EMCEE...")
         run_emcee(flux, fluxerr, sed, emcee_db)
@@ -441,7 +449,8 @@ def run_paintbox(velscale=200, ssp_model="CvD", sample_emiles="all"):
     idx = [sed.parnames.index(p) for p in sed.sspcolnames]
     ptrace_emcee = Table(emcee_traces[:, idx], names=sed.sspcolnames)
     print("Producing corner plots...")
-    plot_corner(ptrace_emcee, emcee_db.replace(".h5", ""), title=galaxy,
+    plot_corner(ptrace_emcee, emcee_db.replace(".h5", ""),
+                title="{} {}".format(galaxy, rname),
                 redo=True)
     print("Producing fitting figure...")
     plot_fitting(wave, flux, fluxerr, sed, emcee_traces, emcee_db,
@@ -462,9 +471,12 @@ if __name__ == "__main__":
               "Na": "[Na/Fe]" if ssp_model == "emiles" else "[Na/H]",
               "K": "[K/H]", "C": "[C/H]", "N": "[N/H]",
               "Mg": "[Mg/H]", "Si": "[Si/H]", "Ca": "[Ca/H]", "Ti": "[Ti/H]"}
-    wdir = os.path.join(context.home, "center_imfs")
+    wdir = os.path.join(context.home, "elliot")
     sample = os.listdir(wdir)
     for galaxy in sample:
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
-        run_paintbox(ssp_model=ssp_model)
+        cubenames = [_ for _ in os.listdir(galdir) if _.endswith(".fits")]
+        for cubename in cubenames:
+            run_paintbox(cubename, ssp_model=ssp_model)
+        break
