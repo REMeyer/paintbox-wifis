@@ -13,7 +13,9 @@ import os
 import platform
 
 import matplotlib
+# matplotlib.use('Agg')
 #matplotlib.use('qt5agg')
+# matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 
 

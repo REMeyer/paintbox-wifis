@@ -11,6 +11,7 @@ Run paintbox in the central part of M85 using WIFIS data.
 
 import os
 import getpass
+import copy
 
 import numpy as np
 from astropy.io import fits
@@ -27,7 +28,9 @@ from scipy.interpolate import interp1d
 
 import context
 import paintbox as pb
-from paintbox.interfaces import TheanoLogLikeInterface
+
+import warnings
+warnings.filterwarnings('ignore')
 
 class CvDCaller():
     def __init__(self, sed):
@@ -46,17 +49,26 @@ class CvDCaller():
             t[self._idxs[param]] = val
         return self.sed(t)
 
-def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0):
+def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
+                  templates_file=None):
     wdir = os.path.join(context.home, "templates")
     elements = ["C", "N", "Na", "Mg", "Si", "Ca", "Ti", "Fe", "K"] if \
                 elements is None else elements
-    ssp_file = os.path.join(context.home,
+    temp_file_old = os.path.join(context.home,
                             "templates/VCJ17_varydoublex_wifis.fits")
-    templates = fits.getdata(ssp_file, ext=0)
+    templates_file = temp_file_old if templates_file is None else templates_file
+    templates = fits.getdata(templates_file, ext=0)
     tnorm = np.median(templates, axis=1)
     templates /= tnorm[:, None]
-    params = Table.read(ssp_file, hdu=1)
-    twave = Table.read(ssp_file, hdu=2)["wave"].data
+    params = Table.read(templates_file, hdu=1)
+    params = params[params.colnames[:4]]
+    if "age" in params.colnames:
+        idx = np.where((params["age"] > 9) & (params["age"] < 14))[0]
+        params = params[idx]
+        templates = templates[idx]
+        params.rename_column("age", "Age")
+        params.rename_column("logzsol", "Z")
+    twave = Table.read(templates_file, hdu=2)["wave"].data
     priors = {}
     limits = {}
     for i, param in enumerate(params.colnames):
@@ -73,9 +85,9 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0):
         priors[element] = stats.uniform(loc=vmin, scale=vmax-vmin)
         ewave = Table.read(elem_file, hdu=2)["wave"].data
         rf = pb.ParametricModel(ewave, rfpar, rfdata)
-        ssp = ssp * rf
+        ssp = ssp * pb.Resample(twave, rf)
     # Adding extinction to the stellar populations
-    stars = pb.Resample(wave, pb.LOSVDConv(ssp, velscale=velscale))
+    stars = pb.Resample(wave, pb.LOSVDConv(ssp))
     priors["V"] = stats.norm(loc=V, scale=100)
     priors["sigma"] = stats.uniform(loc=100, scale=200)
     # Adding a polynomial
@@ -164,31 +176,32 @@ def run_sampler(loglike, priors, outdb, nsteps=3000):
     sampler.run_mcmc(pos, nsteps, progress=True)
     return
 
-def plot_corner(trace, outroot, title=None, redo=False):
+def plot_corner(trace, parnames, outroot, title=None, redo=False):
     global labels
     title = "" if title is None else title
     output = "{}.png".format(outroot)
     if os.path.exists(output) and not redo:
         return
-    N = len(trace.colnames)
-    params = trace.colnames
-    data = np.stack([trace[p] for p in params]).T
+    N = len(parnames)
+    data = np.stack([trace[p] for p in parnames]).T
     v = np.percentile(data, 50, axis=0)
     vmax = np.percentile(data, 84, axis=0)
     vmin = np.percentile(data, 16, axis=0)
     vuerr = vmax - v
     vlerr = v - vmin
     title = [title]
-    for i, param in enumerate(params):
+    for i, param in enumerate(parnames):
         s = "{0}$={1:.2f}^{{+{2:.2f}}}_{{-{3:.2f}}}$".format(
             labels[param], v[i], vuerr[i], vlerr[i])
         title.append(s)
-    fig, axs = plt.subplots(N, N, figsize=(3.54, 3.5))
-    grid = np.array(np.meshgrid(params, params)).reshape(2, -1).T
-    for i, (p1, p2) in enumerate(tqdm(grid, desc="producing corner plots")):
-        i1 = params.index(p1)
-        i2 = params.index(p2)
-        ax = axs[i // N, i % N]
+    grid = np.array(np.meshgrid(parnames, parnames)).reshape(2, -1).T
+    fig = plt.figure(figsize=(3.54, 3.5))
+    gs = fig.add_gridspec(ncols=N, nrows=N)
+    for i, (p1, p2) in enumerate(grid):
+        i1 = parnames.index(p1)
+        i2 = parnames.index(p2)
+        ax = fig.add_subplot(gs[i // N, i % N])
+        # ax = axs[i // N, i % N]
         ax.tick_params(axis="both", which='major',
                        labelsize=4)
         if i // N < i % N:
@@ -196,7 +209,9 @@ def plot_corner(trace, outroot, title=None, redo=False):
             continue
         x = data[:,i1]
         if p1 == p2:
-            sns.kdeplot(x, shade=True, ax=ax, color="tab:blue")
+            hist = sns.kdeplot(x, shade=True, ax=ax, color="tab:blue",
+                            legend=False)
+            hist.set(ylabel=None)
         else:
             y = data[:, i2]
             sns.kdeplot(x, y, shade=True, ax=ax, cmap="Blues")
@@ -266,8 +281,9 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     plt.savefig("{}.png".format(db.replace("_corner", "_loglike")))
     plt.close(fig)
     summary = []
-    for i, param in enumerate(sed.sspcolnames + ["V", "sigma"]):
-        if (i % 5 == 0) and (i>0):
+    print_cols = sed.sspcolnames + ["V", "sigma", "alpha_Ks", "M2L_Ks"]
+    for i, param in enumerate(print_cols):
+        if (i % 6 == 0) and (i>0):
             summary.append("\n")
         t = traces[:,i]
         m = np.median(t)
@@ -287,55 +303,58 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     bestfit = np.median(models, axis=0)
     flux0 = flux - skymed
     # Starting figure
-    fig, axs = plt.subplots(2, 1, gridspec_kw={'height_ratios': [2, 1]},
-                            figsize=(2 * context.fig_width, 3))
-    ax = plt.subplot(axs[0])
+    fig = plt.figure(figsize=(2 * context.fig_width, 3))
+    gs = fig.add_gridspec(ncols=1, nrows=2, height_ratios=[2, 1])
+    ax = fig.add_subplot(gs[0,0])
     ax.fill_between(wave, flux + fluxerr, flux - fluxerr, color="0.8")
     ax.fill_between(wave, flux0 + fluxerr, flux0 - fluxerr,
-                    "-", label=name, color="tab:blue")
+                    label=name, color="tab:blue")
     for i in [0, 2, 1]:
         c = colors[i]
         per = percs[i]
         label = "Model" if i == 1 else None
         ax.fill_between(wave, np.percentile(models, per, axis=0) - skymed,
                          np.percentile(models, percs[i+1], axis=0) - skymed,
-                        color=c, label=label, lw=lw)
+                         color=c, label=label, lw=lw)
     ax.set_ylabel(ylabel)
     ax.xaxis.set_ticklabels([])
-    ax.text(0.1, 0.7, "   ".join(summary), transform=ax.transAxes, fontsize=7)
+    ax.text(0.1, 0.7, "    ".join(summary), transform=ax.transAxes, fontsize=7)
     plt.legend(loc=7)
     ylim = ax.get_ylim()
     ax.set_ylim(None, 1.1 * ylim[1])
     # Residual plot
-    ax = plt.subplot(axs[1])
+    ax = fig.add_subplot(gs[1, 0])
     p = flux - bestfit
     sigma_mad = 1.4826 * np.median(np.abs(p - np.median(p)))
-    ax.fill_between(wave, skymed - fluxerr, skymed + fluxerr, color="0.8")
-    ax.fill_between(wave, fluxerr, -fluxerr, "-", color="tab:blue")
-    sigma_per = sigma_mad/np.median(flux)
+    y0 = np.median(flux)
+    y1, y2 = skymed - fluxerr, skymed + fluxerr
+    ax.fill_between(wave, 100 * y1 / y0, 100 * y2 / y0, color="0.8")
+    y1, y2 = fluxerr, - fluxerr
+    ax.fill_between(wave, 100 * y1 / y0, 100 * y2 / y0, color="tab:blue")
+    sigma_per = sigma_mad / y0 * 100
     for i in [0, 2, 1]:
         c = colors[i]
         per = percs[i]
-        label = "$\sigma_{{MAD}}$={:.1f}%".format(sigma_per) if i==1 \
+        label = "$\sigma_{{\\rm MAD}}$={:.1f}\%".format(sigma_per) if i==1 \
                  else None
-        ax.fill_between(wave, np.percentile(models, per, axis=0) - skymed -
-                        flux0,
-                         np.percentile(models, percs[i+1], axis=0) - skymed -
-                        flux0,
+        y1 = np.percentile(models, per, axis=0) - skymed - flux0
+        y2 = np.percentile(models, percs[i + 1], axis=0) - skymed - flux0
+        ax.fill_between(wave, 100 * y1 / y0, 100 * y2 / y0,
                         color=c, lw=lw, label=label)
-    ax.set_ylim(-5 * sigma_mad, 5 * sigma_mad)
+    ax.set_ylim(-6 * sigma_per, 6 * sigma_per)
     ax.axhline(y=0, ls="--", c="k", lw=1, zorder=1000)
     ax.set_xlabel(r"$\lambda$ (\r{A})")
     ax.set_ylabel(reslabel)
     plt.legend(loc=1, framealpha=1)
     plt.subplots_adjust(left=0.07, right=0.995, hspace=0.02, top=0.99,
                         bottom=0.11)
-    fig.align_ylabels(axs)
+    # fig.align_ylabels(gs)
     plt.savefig("{}.png".format(outfig), dpi=250)
     plt.close()
     return
 
-def make_table(trace, outtab):
+def make_summary_table(trace, outtab):
+    print("Saving results to summary table: ", outtab)
     data = np.array([trace[p].data for p in trace.colnames]).T
     v = np.percentile(data, 50, axis=0)
     vmax = np.percentile(data, 84, axis=0)
@@ -354,9 +373,46 @@ def make_table(trace, outtab):
     tab.write(outtab, overwrite=True)
     return tab
 
+def add_alpha(t, band="2mass_ks", quick=True):
+    """ Uses M/L table to the M/L and alpha parameters. """
+    outtab = copy.copy(t)
+    krpa_imf1 = 1.3
+    krpa_imf2 = 2.3
+    krpa_imf3 = 2.3
+    ml_table = Table.read("/home/kadu/Dropbox/CvD18/FSPS_magnitudes.fits")
+    ml_table = ml_table[ml_table["age"] > 0.98]
+    if quick:
+        ages = np.arange(1, 15)
+        idxs = []
+        for age in ages:
+            diff = np.abs(ml_table["age"].data - age)
+            idx = np.where(diff == diff.min())[0]
+            idxs.append(idx)
+        idxs = np.unique(np.hstack(idxs))
+        ml_table = ml_table[idxs]
+    m2ls = pb.ParametricModel(np.array([21635.6]),
+                             ml_table["logzsol", "age", "imf1", "imf2"],
+                             ml_table["ML_{}".format(band)].data)
+    params = np.stack([t["Z"].data, t["Age"].data, t["x1"].data,
+                       t["x2"].data]).T
+    alphas = np.zeros(len(params))
+    m2ltab = np.zeros(len(params))
+    for i, p in enumerate(tqdm(params, desc="Calculating alpha parameter")):
+        m2l = m2ls(p)
+        m2l_kr = m2ls(np.array([p[0], p[1], krpa_imf1, krpa_imf2]))
+        alphas[i] = m2l / m2l_kr
+        m2ltab[i] = m2l
+    outtab["M2L_Ks"] = m2ltab
+    outtab["alpha_Ks"] = alphas
+    return outtab
+
 def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
                  sample_emiles="all", loglike="normal2", elements=None,
-                 nsteps=4000, postprocessing=False):
+                 nsteps=4000, postprocessing=False, porder=45):
+    if ssp_model == "CvD":
+        corner_pars = ['Z', 'Age', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
+    elif ssp_model == "emiles":
+        corner_pars = ['Z', 'T', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
     cubename = "{}_combined_cube_1_telluricreduced_{}_{}.fits".format(
                 galaxy, date[galaxy], radius)
     name = "{} {}".format(galaxy, radius)
@@ -389,17 +445,17 @@ def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
     flux /= norm
     fluxerr /= norm
     radius = cubename.split("_")[-1].split(".")[0]
-    print("Producing SED model...")
+    print("Producing SED model with paintbox...")
     if ssp_model == "CvD":
-        sed, priors = build_sed_CvD(wave, elements=elements, V=V)
+        sed, priors = build_sed_CvD(wave, elements=elements, V=V,
+                                    porder=porder)
     elif ssp_model == "emiles":
         sed = build_sed_model_emiles(wave, sample=sample_emiles)
+    print("Done!")
     logp = pb.StudTLogLike(flux, sed, obserr=fluxerr)
     priors["nu"] = stats.uniform(loc=2.01, scale=8)
-    #
     outdb = os.path.join(os.getcwd(), "{}_{}_{}_{}_{}.h5".format(
                         galaxy, radius, ssp_model, loglike, elements_str))
-    corner_name = outdb.replace(".h5", "_corner")
     if not os.path.exists(outdb):
         print("Running emcee...")
         run_sampler(logp, priors, outdb, nsteps=nsteps)
@@ -407,27 +463,21 @@ def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
     # Only make postprocessing locally, not @ alphacrucis
     if not postprocessing:
         return
-    reader = emcee.backends.HDFBackend(outdb)
-    trace = reader.get_chain(discard=int(.9 * nsteps), flat=True, thin=80)
-    print("Using trace with {} samples".format(len(trace)))
-    if ssp_model == "CvD":
-        corner_pars = ['Z', 'Age', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
-    elif ssp_model == "emiles":
-        corner_pars = ['Z', 'T', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
-    idx = [sed.parnames.index(p) for p in corner_pars]
-    ptrace_emcee = Table(trace[:, idx], names=corner_pars)
-    print("Producing corner plots...")
-    plot_corner(ptrace_emcee, corner_name,
-                title="{} {}".format(galaxy, radius),
-                redo=False)
-    print("Producing fitting figure...")
-    plot_fitting(wave, flux, fluxerr / factor, sed, trace, outdb,
-                 redo=True, norm=norm, name=name, ylabel="Flux",
-                 reslabel="Residuals")
-    print("Making summary table...")
     outtab = os.path.join(outdb.replace(".h5", "_results.fits"))
-    summary_trace = Table(trace, names=logp.parnames)
-    make_table(summary_trace, outtab)
+    reader = emcee.backends.HDFBackend(outdb)
+    tracedata = reader.get_chain(discard=int(.9 * nsteps), flat=True,
+                                 thin=80)
+    trace = Table(tracedata, names=logp.parnames)
+    print("Using trace with {} samples".format(len(tracedata)))
+    trace = add_alpha(trace)
+    make_summary_table(trace, outtab)
+    corner_name = outdb.replace(".h5", "_corner")
+    plot_corner(trace, corner_pars, corner_name,
+                title="{} {}".format(galaxy, radius), redo=True)
+    print("Producing fitting figure...")
+    plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, outdb,
+                 redo=True, norm=norm, name=name, ylabel="Flux",
+                 reslabel="Res. (\%)")
 
 if __name__ == "__main__":
     postprocessing = True if getpass.getuser() == "kadu" else False
@@ -439,16 +489,20 @@ if __name__ == "__main__":
               "Na": "[Na/Fe]" if ssp_model == "emiles" else "[Na/H]",
               "K": "[K/H]", "C": "[C/H]", "N": "[N/H]",
               "Mg": "[Mg/H]", "Si": "[Si/H]", "Ca": "[Ca/H]", "Ti": "[Ti/H]",
-              "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)"}
+              "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)",
+              "alpha_Ks": r"$\alpha_{\rm Ks}$",
+              "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
     wdir = os.path.join(context.home, "elliot")
     sample = ["M85", "NGC5557"]
     date = {"M85": "20200528", "NGC5557": "20200709"}
     V = {"M85": 729, "NGC5557": 3219}
-    elements = ["Na", "Fe", "Ca", "K"]
+    # elements = ["Na", "Fe", "Ca", "K"]
     for galaxy in sample[::-1]:
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
         for radius in ["R1", "R2"]:
+            print("=" * 80)
+            print("Processing galaxy {}, region {}".format(galaxy, radius))
             run_paintbox(galaxy, radius, V[galaxy], ssp_model=ssp_model,
-                         loglike="studt", elements=elements,
+                         loglike="studt", elements=None,
                          postprocessing=postprocessing)

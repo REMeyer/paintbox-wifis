@@ -53,7 +53,7 @@ def prepare_VCJ17(data_dir, wave, output, redo=False):
     hdulist.writeto(output, overwrite=True)
     return
 
-def prepare_response_functions(data_dir, wave, out, redo=False):
+def prepare_response_functions(data_dir, wave, out):
     """ Prepare response functions from CvD models. """
     specs = sorted(os.listdir(data_dir))
     # Read one spectrum to get name of columns
