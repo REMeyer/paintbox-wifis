@@ -1,0 +1,8 @@
+name: paintbox
+dependencies:
+  - numpy
+  - astropy
+  - matplotlib
+  - tqdm
+  - seaborn
+  - scipy
