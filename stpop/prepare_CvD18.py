@@ -15,6 +15,7 @@ from astropy.io import fits
 from tqdm import tqdm
 import ppxf.ppxf_util as util
 from spectres import spectres
+from glob import glob
 
 import context
 
@@ -22,7 +23,8 @@ def prepare_VCJ17(data_dir, wave, output, redo=False):
     """ Prepare templates for SSP models from Villaume et al. (2017)."""
     if os.path.exists(output) and not redo:
         return
-    specs = sorted(os.listdir(data_dir))
+    #specs = sorted(os.listdir(data_dir))
+    specs = sorted(glob(data_dir+'/VCJ*'))
     nimf = 16
     imfs = 0.5 + np.arange(nimf) / 5
     x2s, x1s=  np.stack(np.meshgrid(imfs, imfs)).reshape(2, -1)
@@ -114,11 +116,12 @@ def prepare_templates_wifis(w1=8600, w2=13200, velscale=200):
     logLam, velscale = util.log_rebin([w1, w2], np.ones(10),
                                                velscale=velscale)[1:]
     wave = np.exp(logLam)
-    ssps_dir = os.path.join(context.home, "CvD18/VCJ_v8")
+    ssps_dir = os.path.join(context.home, "CvD18/VCJv8")
     output = os.path.join(context.home,
                           "templates/VCJ17_varydoublex_wifis.fits")
+    print(ssps_dir)
     prepare_VCJ17(ssps_dir, wave, output)
-    rfs_dir = os.path.join(context.home, "CvD18/RFN_v3")
+    rfs_dir = os.path.join(context.home, "CvD18/RFNv3")
     out = os.path.join(context.home, "templates/C18_rfs_wifis")
     prepare_response_functions(rfs_dir, wave, out)
 

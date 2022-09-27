@@ -29,10 +29,13 @@ from scipy.interpolate import interp1d
 import context
 import paintbox as pb
 
+from sys import exit
+
 import warnings
 warnings.filterwarnings('ignore')
 
 class CvDCaller():
+    ''' Class that defines the CvD models'''
     def __init__(self, sed):
         self.sed = sed
         self.parnames = list(dict.fromkeys(sed.parnames))
@@ -51,58 +54,79 @@ class CvDCaller():
 
 def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
                   templates_file=None):
+                  
     wdir = os.path.join(context.home, "templates")
     elements = ["C", "N", "Na", "Mg", "Si", "Ca", "Ti", "Fe", "K"] if \
                 elements is None else elements
     temp_file_old = os.path.join(context.home,
                             "templates/VCJ17_varydoublex_wifis.fits")
     templates_file = temp_file_old if templates_file is None else templates_file
+
+    # Loads template file, median normalizes templates
+    #templates = fits.getdata(templates_file, ext=2)
     templates = fits.getdata(templates_file, ext=0)
     tnorm = np.median(templates, axis=1)
     templates /= tnorm[:, None]
+    #params = Table.read(templates_file, hdu=3)
     params = Table.read(templates_file, hdu=1)
     params = params[params.colnames[:4]]
+
+    # If fitting for age, select only models between 9-14 Gyr (?)
     if "age" in params.colnames:
         idx = np.where((params["age"] > 9) & (params["age"] < 14))[0]
         params = params[idx]
         templates = templates[idx]
         params.rename_column("age", "Age")
         params.rename_column("logzsol", "Z")
+
+    # Load wavelength array data
     twave = Table.read(templates_file, hdu=2)["wave"].data
     priors = {}
     limits = {}
+
+    # For each param, store max and minimum, then create uniform prior dist
     for i, param in enumerate(params.colnames):
         vmin, vmax = params[param].min(), params[param].max()
         limits[param] = (vmin, vmax)
         priors[param] = stats.uniform(loc=vmin, scale=vmax-vmin)
     ssp = pb.ParametricModel(twave, params, templates)
+
+    # Load elemental information?
     for element in elements:
         elem_file = os.path.join(wdir, "C18_rfs_wifis_{}.fits".format(element))
         rfdata = fits.getdata(elem_file, ext=0)
         rfpar = Table.read(elem_file, hdu=1)
+        #rfdata = fits.getdata(templates_file, extname="DATA.{}".format(element))
+        #rfpar = Table.read(templates_file, hdu="PARS.{}".format(element))
         vmin, vmax = rfpar[element].min(), rfpar[element].max()
         limits[element] = (vmin, vmax)
         priors[element] = stats.uniform(loc=vmin, scale=vmax-vmin)
+        #ewave = Table.read(templates_file, hdu=1)["wave"].data
         ewave = Table.read(elem_file, hdu=2)["wave"].data
         rf = pb.ParametricModel(ewave, rfpar, rfdata)
         ssp = ssp * pb.Resample(twave, rf)
+
     # Adding extinction to the stellar populations
     stars = pb.Resample(wave, pb.LOSVDConv(ssp))
-    priors["V"] = stats.norm(loc=V, scale=100)
-    priors["sigma"] = stats.uniform(loc=100, scale=200)
+    #priors["Vsyst"] = stats.norm(loc=V, scale=100)
+    priors["Vsyst"] = stats.uniform(loc=V-100, scale=200)
+    priors["sigma"] = stats.uniform(loc=100, scale=400)
+
     # Adding a polynomial
     poly = pb.Polynomial(wave, porder)
     for p in poly.parnames:
-        if p == "p0":
+        if p == "p_0":
             mu, sd = 1, 0.3
             a, b = (0 - mu) / sd, (np.infty - mu) / sd
             priors[p] = stats.truncnorm(a, b, mu, sd)
         else:
             priors[p] = stats.norm(0, 0.02)
+
     # Using Polynomial to make sky model
     sky = pb.Polynomial(wave, 0)
     sky.parnames = [_.replace("p", "sky") for _ in sky.parnames]
-    priors["sky0"] = stats.norm(0, 0.1)
+    priors["sky_0"] = stats.norm(0, 0.1)
+
     # Creating a model including LOSVD
     sed = stars * poly + sky
     sed = CvDCaller(sed)
@@ -111,6 +135,7 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
         print("Missing parameters in priors: ", missing)
     else:
         print("No missing parameter in the model priors!")
+
     # theta = np.array([0, 10, 2., 2., 0, 0, 0, 0, 0.1, 3.8, 200, 729, 1])
     # theta = np.hstack([theta, np.zeros(porder + 1)])
     # Setting properties that may be useful later in modeling
@@ -242,7 +267,7 @@ def plot_corner(trace, parnames, outroot, title=None, redo=False):
 
 def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
                  norm=1, unit_norm=1, lw=1, name=None, ylabel=None,
-                 reslabel=None):
+                 reslabel=None, liketype = 'studt'):
     global labels
     ylabel = "$f_\lambda$ ($10^{{-{0}}}$ " \
              "erg cm$^{{-2}}$ s$^{{-1}}$ \\r{{A}}$^{{-1}}$)".format(unit_norm) \
@@ -256,7 +281,10 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     fracs = np.array([0.3, 0.6, 0.3])
     colors = [cm.get_cmap("Oranges")(f) for f in fracs]
     models = np.zeros((len(traces), len(wave)))
-    loglike = pb.NormalLogLike(flux, sed, obserr=fluxerr)
+    if liketype == 'studt':
+        loglike = pb.StudTLogLike(flux, sed, obserr=fluxerr)
+    else:
+        loglike = pb.NormalLogLike(flux, sed, obserr=fluxerr)
     llike = np.zeros(len(traces))
     for i in tqdm(range(len(traces)), desc="Loading spectra for plots and "
                                            "table..."):
@@ -379,7 +407,7 @@ def add_alpha(t, band="2mass_ks", quick=True):
     krpa_imf1 = 1.3
     krpa_imf2 = 2.3
     krpa_imf3 = 2.3
-    ml_table = Table.read("/home/kadu/Dropbox/CvD18/FSPS_magnitudes.fits")
+    ml_table = Table.read("/Users/meyer/WIFIS/paintbox/wifis/stpop/FSPS_magnitudes.fits")
     ml_table = ml_table[ml_table["age"] > 0.98]
     if quick:
         ages = np.arange(1, 15)
@@ -406,16 +434,20 @@ def add_alpha(t, band="2mass_ks", quick=True):
     outtab["alpha_Ks"] = alphas
     return outtab
 
-def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
+def run_paintbox(galaxy, radius, V, date, velscale=200, ssp_model="CvD",
                  sample_emiles="all", loglike="normal2", elements=None,
                  nsteps=4000, postprocessing=False, porder=45):
+    # Defining fit parameters based on model
     if ssp_model == "CvD":
         corner_pars = ['Z', 'Age', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
     elif ssp_model == "emiles":
         corner_pars = ['Z', 'T', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
+    #Grabbing cube filename
     cubename = "{}_combined_cube_1_telluricreduced_{}_{}.fits".format(
                 galaxy, date[galaxy], radius)
+    #Define name for galaxy and region 
     name = "{} {}".format(galaxy, radius)
+    # Determine fitting elements(?)
     elements_str = "all" if elements is None else "".join(elements)
     # Read first spectrum to set the dispersion
     flux = fits.getdata(cubename, ext=0)
@@ -452,10 +484,15 @@ def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
     elif ssp_model == "emiles":
         sed = build_sed_model_emiles(wave, sample=sample_emiles)
     print("Done!")
-    logp = pb.StudTLogLike(flux, sed, obserr=fluxerr)
-    priors["nu"] = stats.uniform(loc=2.01, scale=8)
+    if loglike == 'studt':
+        logp = pb.StudTLogLike(flux, sed, obserr=fluxerr)
+        priors["nu"] = stats.uniform(loc=2.01, scale=8)
+    else:
+        logp = pb.NormalLogLike(flux, sed, obserr=fluxerr)
     outdb = os.path.join(os.getcwd(), "{}_{}_{}_{}_{}.h5".format(
                         galaxy, radius, ssp_model, loglike, elements_str))
+    #return sed, priors, logp, flux, fluxerr
+
     if not os.path.exists(outdb):
         print("Running emcee...")
         run_sampler(logp, priors, outdb, nsteps=nsteps)
@@ -466,7 +503,7 @@ def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
     outtab = os.path.join(outdb.replace(".h5", "_results.fits"))
     reader = emcee.backends.HDFBackend(outdb)
     tracedata = reader.get_chain(discard=int(.9 * nsteps), flat=True,
-                                 thin=80)
+                                 thin=25)
     trace = Table(tracedata, names=logp.parnames)
     print("Using trace with {} samples".format(len(tracedata)))
     trace = add_alpha(trace)
@@ -477,10 +514,10 @@ def run_paintbox(galaxy, radius, V, velscale=200, ssp_model="CvD",
     print("Producing fitting figure...")
     plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, outdb,
                  redo=True, norm=norm, name=name, ylabel="Flux",
-                 reslabel="Res. (\%)")
+                 reslabel="Res. (\%)", liketype=loglike)
 
 if __name__ == "__main__":
-    postprocessing = True if getpass.getuser() == "kadu" else False
+    postprocessing = True# if getpass.getuser() == "kadu" else False
     ssp_model = "CvD"
     labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
               "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]",
@@ -494,15 +531,17 @@ if __name__ == "__main__":
               "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
     wdir = os.path.join(context.home, "elliot")
     sample = ["M85", "NGC5557"]
-    date = {"M85": "20200528", "NGC5557": "20200709"}
+    #date = {"M85": "20210324", "NGC5557": "20200709"}
+    date = {"M85": "20210324", "NGC5557": "20210324"}
     V = {"M85": 729, "NGC5557": 3219}
+    nsteps = 4000
     # elements = ["Na", "Fe", "Ca", "K"]
     for galaxy in sample[::-1]:
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
-        for radius in ["R1", "R2"]:
+        for radius in ["R2"]:#, "R2"]:
             print("=" * 80)
             print("Processing galaxy {}, region {}".format(galaxy, radius))
-            run_paintbox(galaxy, radius, V[galaxy], ssp_model=ssp_model,
+            run_paintbox(galaxy, radius, V[galaxy], date, ssp_model=ssp_model,
                          loglike="studt", elements=None,
-                         postprocessing=postprocessing)
+                         postprocessing=postprocessing, nsteps=nsteps, porder=45)

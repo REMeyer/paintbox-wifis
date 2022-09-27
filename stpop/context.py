@@ -19,10 +19,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 
-if platform.node() == "kadu-Inspiron-5557":
-    home = "/home/kadu/Dropbox/SPINS/"
-elif platform.node() in ["uv100", "alphacrucis"]:
-    home = "/sto/home/cebarbosa/SPINS/"
+if platform.node() == "asmaclap04":
+    home = "/Users/meyer/WIFIS/paintbox/wifis/stpop/data/"
 
 data_dir = os.path.join(home, "data")
 molecfit_exec_dir = os.path.join(home, "molecfit/bin")
