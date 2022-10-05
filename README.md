@@ -1,2 +1,2 @@
-# wifis
-Kinematics and stellar populations using WIFIS
+# paintbox-wifis
+A wrapper of **[paintbox](https://github.com/cebarbosa/paintbox)** full spectral fitting for use with WIFIS data. Wrapper written by [@cebarbosa](https://github.com/cebarbosa) and adapted here to work with full-index fitting.

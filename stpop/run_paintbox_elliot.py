@@ -108,8 +108,8 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
 
     # Adding extinction to the stellar populations
     stars = pb.Resample(wave, pb.LOSVDConv(ssp))
-    #priors["Vsyst"] = stats.norm(loc=V, scale=100)
-    priors["Vsyst"] = stats.uniform(loc=V-100, scale=200)
+    priors["Vsyst"] = stats.norm(loc=V, scale=100)
+    #priors["Vsyst"] = stats.uniform(loc=V-100, scale=200)
     priors["sigma"] = stats.uniform(loc=100, scale=400)
 
     # Adding a polynomial
@@ -434,7 +434,7 @@ def add_alpha(t, band="2mass_ks", quick=True):
     outtab["alpha_Ks"] = alphas
     return outtab
 
-def run_paintbox(galaxy, radius, V, date, velscale=200, ssp_model="CvD",
+def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
                  sample_emiles="all", loglike="normal2", elements=None,
                  nsteps=4000, postprocessing=False, porder=45):
     # Defining fit parameters based on model
@@ -444,7 +444,7 @@ def run_paintbox(galaxy, radius, V, date, velscale=200, ssp_model="CvD",
         corner_pars = ['Z', 'T', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
     #Grabbing cube filename
     cubename = "{}_combined_cube_1_telluricreduced_{}_{}.fits".format(
-                galaxy, date[galaxy], radius)
+                galaxy, date, radius)
     #Define name for galaxy and region 
     name = "{} {}".format(galaxy, radius)
     # Determine fitting elements(?)
@@ -467,11 +467,13 @@ def run_paintbox(galaxy, radius, V, date, velscale=200, ssp_model="CvD",
     ############################################################################
     # Inflationary term for testing with Student's T loglike
     if loglike == "studt":
-        factor = 3. if radius=="R1" else 2.
+        #factor = 3. if radius=="R1" else 2.
+        factor = 1.
         fluxerr *= factor
     else:
         factor = 1.
     ############################################################################
+
     # Normalizing the data
     norm = np.median(flux)
     flux /= norm
@@ -484,22 +486,33 @@ def run_paintbox(galaxy, radius, V, date, velscale=200, ssp_model="CvD",
     elif ssp_model == "emiles":
         sed = build_sed_model_emiles(wave, sample=sample_emiles)
     print("Done!")
+
+    # Defining a mask for the fit
+    sedmask = np.zeros(len(sed.wave))
+    regions = [(8800,9500),(11000,11400)]
+    for region in regions:
+        maskx = np.where((sed.wave >= region[0]) & (sed.wave <= region[1]))[0]
+        sedmask[maskx] = 1
+
     if loglike == 'studt':
-        logp = pb.StudTLogLike(flux, sed, obserr=fluxerr)
+        logp = pb.StudTLogLike(flux, sed, obserr=fluxerr, mask=sedmask)
         priors["nu"] = stats.uniform(loc=2.01, scale=8)
     else:
-        logp = pb.NormalLogLike(flux, sed, obserr=fluxerr)
-    outdb = os.path.join(os.getcwd(), "{}_{}_{}_{}_{}.h5".format(
+        logp = pb.NormalLogLike(flux, sed, obserr=fluxerr, mask=sedmask)
+    
+    outdb = os.path.join(outdir, "{}_{}_{}_{}_{}.h5".format(
                         galaxy, radius, ssp_model, loglike, elements_str))
-    #return sed, priors, logp, flux, fluxerr
 
     if not os.path.exists(outdb):
         print("Running emcee...")
         run_sampler(logp, priors, outdb, nsteps=nsteps)
+
     ############################################################################
-    # Only make postprocessing locally, not @ alphacrucis
+    # Only make postprocessing locally 
     if not postprocessing:
-        return
+        return sed, priors, logp, flux, fluxerr
+    ############################################################################
+
     outtab = os.path.join(outdb.replace(".h5", "_results.fits"))
     reader = emcee.backends.HDFBackend(outdb)
     tracedata = reader.get_chain(discard=int(.9 * nsteps), flat=True,
@@ -532,7 +545,10 @@ if __name__ == "__main__":
     wdir = os.path.join(context.home, "elliot")
     sample = ["M85", "NGC5557"]
     #date = {"M85": "20210324", "NGC5557": "20200709"}
-    date = {"M85": "20210324", "NGC5557": "20210324"}
+    date = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
+            "NGC5557": {'R1':"20200709", "R2":"20210324"}}
+    outpath = {"M85": {'R1': "R1_TelluricMasking", 'R2':"R2_TelluricMasking"}, 
+                "NGC5557": {'R1':"R1_TelluricMasking","R2":"R2_TelluricMasking"}}
     V = {"M85": 729, "NGC5557": 3219}
     nsteps = 4000
     # elements = ["Na", "Fe", "Ca", "K"]
@@ -540,8 +556,11 @@ if __name__ == "__main__":
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
         for radius in ["R2"]:#, "R2"]:
+            outdir = os.path.join(galdir, outpath[galaxy][radius])
+            if not os.path.exists(outdir):
+                os.mkdir(outdir)
             print("=" * 80)
             print("Processing galaxy {}, region {}".format(galaxy, radius))
-            run_paintbox(galaxy, radius, V[galaxy], date, ssp_model=ssp_model,
-                         loglike="studt", elements=None,
-                         postprocessing=postprocessing, nsteps=nsteps, porder=45)
+            run_paintbox(galaxy, radius, V[galaxy], date[galaxy][radius], outdir, 
+                        ssp_model=ssp_model, loglike="studt", elements=None,
+                        postprocessing=postprocessing, nsteps=nsteps, porder=45)
