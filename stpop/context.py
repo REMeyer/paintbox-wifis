@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 
 if platform.node() == "asmaclap04":
     home = "/Users/meyer/WIFIS/paintbox/wifis/stpop/data/"
+elif platform.node() == 'wifis-monster':
+    home = "/home/elliot/paintbox-wifis/stpop/data/"
 
 data_dir = os.path.join(home, "data")
 molecfit_exec_dir = os.path.join(home, "molecfit/bin")

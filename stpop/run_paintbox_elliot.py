@@ -12,6 +12,7 @@ Run paintbox in the central part of M85 using WIFIS data.
 import os
 import getpass
 import copy
+import platform
 
 import numpy as np
 from astropy.io import fits
@@ -25,6 +26,7 @@ import seaborn as sns
 import emcee
 from scipy import stats
 from scipy.interpolate import interp1d
+from multiprocessing import Pool
 
 import context
 import paintbox as pb
@@ -87,6 +89,8 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
     # For each param, store max and minimum, then create uniform prior dist
     for i, param in enumerate(params.colnames):
         vmin, vmax = params[param].min(), params[param].max()
+        #if param == 'age':
+        #    vmax = 7.0
         limits[param] = (vmin, vmax)
         priors[param] = stats.uniform(loc=vmin, scale=vmax-vmin)
     ssp = pb.ParametricModel(twave, params, templates)
@@ -407,7 +411,8 @@ def add_alpha(t, band="2mass_ks", quick=True):
     krpa_imf1 = 1.3
     krpa_imf2 = 2.3
     krpa_imf3 = 2.3
-    ml_table = Table.read("/Users/meyer/WIFIS/paintbox/wifis/stpop/FSPS_magnitudes.fits")
+    #ml_table = Table.read("/Users/meyer/WIFIS/paintbox/wifis/stpop/FSPS_magnitudes.fits")
+    ml_table = Table.read("/home/elliot/paintbox-wifis/stpop/FSPS_magnitudes.fits")
     ml_table = ml_table[ml_table["age"] > 0.98]
     if quick:
         ages = np.arange(1, 15)
@@ -488,11 +493,29 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     print("Done!")
 
     # Defining a mask for the fit
-    sedmask = np.zeros(len(sed.wave))
-    regions = [(8800,9500),(11000,11400)]
+    #Line definitions & other definitions
+    #WIFIS Defs
+    bluelow =  [9855, 10300, 11340, 11667, 11710, 12460, 12780, 12648, 
+                    12240, 11905]
+    bluehigh = [9880, 10320, 11370, 11680, 11750, 12495, 12800, 12660, 
+                    12260, 11935]
+    linelow =  [9905, 10337, 11372, 11680, 11765, 12505, 12810, 12670, 
+                    12309, 11935]
+    linehigh = [9935, 10360, 11415, 11705, 11793, 12545, 12840, 12690, 
+                    12333, 11965]
+    redlow =   [9940, 10365, 11417, 11710, 11793, 12555, 12860, 12700, 
+                    12360, 12005]
+    redhigh =  [9970, 10390, 11447, 11750, 11810, 12590, 12870, 12720, 
+                    12390, 12025]
+    regions = []
+    for low, high in zip(bluelow, redhigh):
+        regions.append((low,high))
+
+    sedmask = np.ones(len(sed.wave))
+    #regions = [(8800,9600),(11000,11300), (12900,13000)]
     for region in regions:
         maskx = np.where((sed.wave >= region[0]) & (sed.wave <= region[1]))[0]
-        sedmask[maskx] = 1
+        sedmask[maskx] = 0
 
     if loglike == 'studt':
         logp = pb.StudTLogLike(flux, sed, obserr=fluxerr, mask=sedmask)
@@ -542,25 +565,27 @@ if __name__ == "__main__":
               "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)",
               "alpha_Ks": r"$\alpha_{\rm Ks}$",
               "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
-    wdir = os.path.join(context.home, "elliot")
+    if platform.node() == 'wifis-monster':
+        wdir = os.path.join(context.home, "wifis-data")
+    else:
+        wdir = os.path.join(context.home, "elliot")
     sample = ["M85", "NGC5557"]
     #date = {"M85": "20210324", "NGC5557": "20200709"}
     date = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
             "NGC5557": {'R1':"20200709", "R2":"20210324"}}
-    outpath = {"M85": {'R1': "R1_TelluricMasking", 'R2':"R2_TelluricMasking"}, 
-                "NGC5557": {'R1':"R1_TelluricMasking","R2":"R2_TelluricMasking"}}
+    dirsuffix = 'LineFit'
     V = {"M85": 729, "NGC5557": 3219}
     nsteps = 4000
     # elements = ["Na", "Fe", "Ca", "K"]
     for galaxy in sample[::-1]:
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
-        for radius in ["R2"]:#, "R2"]:
-            outdir = os.path.join(galdir, outpath[galaxy][radius])
+        for radius in ["R1", "R2"]:
+            outdir = os.path.join(galdir, radius+'_'+dirsuffix)
             if not os.path.exists(outdir):
                 os.mkdir(outdir)
             print("=" * 80)
             print("Processing galaxy {}, region {}".format(galaxy, radius))
             run_paintbox(galaxy, radius, V[galaxy], date[galaxy][radius], outdir, 
-                        ssp_model=ssp_model, loglike="studt", elements=None,
+                        ssp_model=ssp_model, loglike="studt", elements=['Na','K','Fe','Ca'],
                         postprocessing=postprocessing, nsteps=nsteps, porder=45)
