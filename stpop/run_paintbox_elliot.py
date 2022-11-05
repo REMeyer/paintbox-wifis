@@ -30,6 +30,7 @@ from multiprocessing import Pool
 
 import context
 import paintbox as pb
+import plotting
 
 from sys import exit
 
@@ -412,7 +413,7 @@ def add_alpha(t, band="2mass_ks", quick=True):
     krpa_imf2 = 2.3
     krpa_imf3 = 2.3
     #ml_table = Table.read("/Users/meyer/WIFIS/paintbox/wifis/stpop/FSPS_magnitudes.fits")
-    ml_table = Table.read("/home/elliot/paintbox-wifis/stpop/FSPS_magnitudes.fits")
+    ml_table = Table.read(context.home + "FSPS_magnitudes.fits")
     ml_table = ml_table[ml_table["age"] > 0.98]
     if quick:
         ages = np.arange(1, 15)
@@ -441,7 +442,7 @@ def add_alpha(t, band="2mass_ks", quick=True):
 
 def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
                  sample_emiles="all", loglike="normal2", elements=None,
-                 nsteps=4000, postprocessing=False, porder=45):
+                 nsteps=4000, postprocessing=False, porder=45, testing=False):
     # Defining fit parameters based on model
     if ssp_model == "CvD":
         corner_pars = ['Z', 'Age', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
@@ -507,6 +508,8 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
                     12360, 12005]
     redhigh =  [9970, 10390, 11447, 11750, 11810, 12590, 12870, 12720, 
                     12390, 12025]
+    line_name = np.array(['FeH','CaI','NaI','KI_a','KI_b', 'KI_1.25', 'PaB',\
+            'NaI127', 'NaI123','CaII119'])
     regions = []
     for low, high in zip(bluelow, redhigh):
         regions.append((low,high))
@@ -522,6 +525,9 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
         priors["nu"] = stats.uniform(loc=2.01, scale=8)
     else:
         logp = pb.NormalLogLike(flux, sed, obserr=fluxerr, mask=sedmask)
+
+    if testing:
+        return sed, priors, logp, flux, fluxerr
     
     outdb = os.path.join(outdir, "{}_{}_{}_{}_{}.h5".format(
                         galaxy, radius, ssp_model, loglike, elements_str))
@@ -545,12 +551,16 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     trace = add_alpha(trace)
     make_summary_table(trace, outtab)
     corner_name = outdb.replace(".h5", "_corner")
-    plot_corner(trace, corner_pars, corner_name,
-                title="{} {}".format(galaxy, radius), redo=True)
-    print("Producing fitting figure...")
-    plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, outdb,
-                 redo=True, norm=norm, name=name, ylabel="Flux",
+    #plot_corner(trace, corner_pars, corner_name,
+    #            title="{} {}".format(galaxy, radius), redo=True)
+    #print("Producing fitting figure...")
+    #plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, outdb,
+    #             redo=True, norm=norm, name=name, ylabel="Flux",
+    #             reslabel="Res. (\%)", liketype=loglike)
+    plotting.plot_linefit(wave, flux, fluxerr / factor, sed, tracedata, outdb,
+                 regions, line_name, redo=True, norm=norm, name=name, ylabel="Flux",
                  reslabel="Res. (\%)", liketype=loglike)
+
 
 if __name__ == "__main__":
     postprocessing = True# if getpass.getuser() == "kadu" else False
@@ -565,27 +575,35 @@ if __name__ == "__main__":
               "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)",
               "alpha_Ks": r"$\alpha_{\rm Ks}$",
               "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
+
     if platform.node() == 'wifis-monster':
         wdir = os.path.join(context.home, "wifis-data")
     else:
         wdir = os.path.join(context.home, "elliot")
-    sample = ["M85", "NGC5557"]
+
+    sample = ["M85"]#, "NGC5557"]
     #date = {"M85": "20210324", "NGC5557": "20200709"}
     date = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
             "NGC5557": {'R1':"20200709", "R2":"20210324"}}
     dirsuffix = 'LineFit'
+    forcedir = 'FullSpectralFitR1'
     V = {"M85": 729, "NGC5557": 3219}
+
     nsteps = 4000
     # elements = ["Na", "Fe", "Ca", "K"]
+    elements = None
     for galaxy in sample[::-1]:
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
         for radius in ["R1", "R2"]:
-            outdir = os.path.join(galdir, radius+'_'+dirsuffix)
+            if forcedir:
+                outdir = os.path.join(galdir, forcedir)
+            else:
+                outdir = os.path.join(galdir, radius+'_'+dirsuffix)
             if not os.path.exists(outdir):
                 os.mkdir(outdir)
             print("=" * 80)
             print("Processing galaxy {}, region {}".format(galaxy, radius))
             run_paintbox(galaxy, radius, V[galaxy], date[galaxy][radius], outdir, 
-                        ssp_model=ssp_model, loglike="studt", elements=['Na','K','Fe','Ca'],
+                        ssp_model=ssp_model, loglike="studt", elements=elements,
                         postprocessing=postprocessing, nsteps=nsteps, porder=45)
