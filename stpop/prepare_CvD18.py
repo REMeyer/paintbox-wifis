@@ -118,12 +118,13 @@ def prepare_templates_wifis(w1=8600, w2=13200, velscale=200):
     wave = np.exp(logLam)
     ssps_dir = os.path.join(context.home, "CvD18/VCJv8")
     output = os.path.join(context.home,
-                          "templates/VCJ17_varydoublex_wifis.fits")
+                          "templates_alpha/VCJ17_varydoublex_wifis.fits")
     print(ssps_dir)
     prepare_VCJ17(ssps_dir, wave, output)
     rfs_dir = os.path.join(context.home, "CvD18/RFNv3")
-    out = os.path.join(context.home, "templates/C18_rfs_wifis")
+    out = os.path.join(context.home, "templates_alpha/C18_rfs_wifis")
     prepare_response_functions(rfs_dir, wave, out)
 
 if __name__ == "__main__":
-    prepare_templates_wifis()
+    #prepare_templates_wifis()
+    prepare_templates_wifis(w1=8600, w2 = 24000)

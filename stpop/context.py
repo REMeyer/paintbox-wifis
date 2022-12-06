@@ -27,6 +27,21 @@ elif platform.node() == 'wifis-monster':
 data_dir = os.path.join(home, "data")
 molecfit_exec_dir = os.path.join(home, "molecfit/bin")
 
+postprocessing = True# if getpass.getuser() == "kadu" else False
+ssp_model = "CvD"
+
+labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
+              "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]",
+              "Age": "Age (Gyr)", "x1": "$x_1$", "x2": "$x_2$", "Ca": "[Ca/H]",
+              "Fe": "[Fe/H]", "Age": "Age (Gyr)",
+              "Na": "[Na/Fe]" if ssp_model == "emiles" else "[Na/H]",
+              "K": "[K/H]", "C": "[C/H]", "N": "[N/H]",
+              "Mg": "[Mg/H]", "Si": "[Si/H]", "Ca": "[Ca/H]", "Ti": "[Ti/H]",
+              "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)",
+              "alpha_Ks": r"$\alpha_{\rm Ks}$",
+              "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
+
+
 fig_width = 3.54 # inches - A&A template
 
 # Matplotlib settings

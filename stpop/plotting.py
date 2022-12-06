@@ -1,15 +1,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from astropy.io import fits
 from astropy.table import Table, vstack
 import paintbox as pb
 from tqdm import tqdm
+import os
+import context
 
-def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
+def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions, 
+                 line_name, redo=True, linefit = False, sky=None,
                  norm=1, unit_norm=1, lw=1, name=None, ylabel=None,
                  reslabel=None, liketype = 'studt'):
                  
-    global labels
     ylabel = "$f_\lambda$ ($10^{{-{0}}}$ " \
              "erg cm$^{{-2}}$ s$^{{-1}}$ \\r{{A}}$^{{-1}}$)".format(unit_norm) \
              if ylabel is None else ylabel
@@ -21,6 +24,13 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     percs = np.array([2.2, 15.8, 84.1, 97.8])
     fracs = np.array([0.3, 0.6, 0.3])
     colors = [cm.get_cmap("Oranges")(f) for f in fracs]
+
+    c = 299792.458
+    argvsyst = np.where(np.array(sed.parnames) == 'Vsyst')[0]
+    vsyst_med = np.percentile(traces[:,argvsyst], 50)
+    v_c = vsyst_med/c
+    z_factor = np.sqrt((1+v_c)/(1-v_c))
+
     models = np.zeros((len(traces), len(wave)))
     if liketype == 'studt':
         loglike = pb.StudTLogLike(flux, sed, obserr=fluxerr)
@@ -52,13 +62,20 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     summary = []
     print_cols = sed.sspcolnames + ["V", "sigma", "alpha_Ks", "M2L_Ks"]
     for i, param in enumerate(print_cols):
-        if (i % 6 == 0) and (i>0):
+        if (i % 5 == 0) and (i>0):
             summary.append("\n")
-        t = traces[:,i]
+        if param == 'V':
+            t = np.array(tracetable['Vsyst'])
+        else:
+            t = np.array(tracetable[param])
         m = np.median(t)
         lowerr = m - np.percentile(t, 16)
         uperr = np.percentile(t, 84) - m
-        s = "{}=${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}$".format(labels[param], m,
+        #mask = tracetable['param'] == param
+        #m = float(tracetable[mask]['median'])
+        #lowerr = float(tracetable[mask]['lerr'])
+        #uperr = float(tracetable[mask]['uerr'])
+        s = "{}=${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}$".format(context.labels[param], m,
                                                        uperr, lowerr)
         summary.append(s)
     ############################################################################
@@ -120,14 +137,40 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     # fig.align_ylabels(gs)
     plt.savefig("{}.png".format(outfig), dpi=250)
     plt.close()
+
+    if linefit:
+        # linefit figure
+        fig, axes = plt.subplots(2,5, figsize=(10,4))
+        axes = axes.flatten()
+        for i in range(len(line_name)):
+            plotwave = np.where(np.logical_and(wave >= regions[i][0]*z_factor,
+                                    wave <= regions[i][1]*z_factor))[0]
+            axes[i].plot(wave[plotwave], flux[plotwave]-skymed[plotwave], color='black')
+            axes[i].plot(wave[plotwave], np.percentile(models, 50, axis=0)[plotwave]
+                        - skymed[plotwave], color='orange')
+            axes[i].fill_between(wave[plotwave], np.percentile(models, 16, axis=0)[plotwave]-
+                        skymed[plotwave], np.percentile(models, 84, axis=0)[plotwave]-
+                        skymed[plotwave],
+                        alpha=0.3, color='orange')
+            axes[i].set_title(line_name[i])
+            #ylim = axes[i].get_ylim()
+            #axes[i].set_ylim(None, 1.1 * ylim[1])
+
+        axes[0].set_ylabel(ylabel)
+        #ax.text(0.1, 0.7, "    ".join(summary), transform=ax.transAxes, fontsize=7)
+        plt.legend(loc=7)
+        # fig.align_ylabels(gs)
+        outfig = "{}_linefitting".format(db.replace(".h5", ""))
+        plt.savefig("{}.png".format(outfig), dpi=250)
+        plt.close()
+
+
     return
 
 def plot_linefit(wave, flux, fluxerr, sed, traces, db, regions, line_name,
                  redo=True, sky=None,
                  norm=1, unit_norm=1, lw=1, name=None, ylabel=None,
                  reslabel=None, liketype = 'studt'):
-
-    global labels
 
     percs = np.array([2.2, 15.8, 84.1, 97.8])
     models = np.zeros((len(traces), len(wave)))
@@ -179,22 +222,6 @@ def plot_linefit(wave, flux, fluxerr, sed, traces, db, regions, line_name,
                     alpha=0.3, color='orange')
         ax.set_title(line_name[i])
 
-    #                     np.percentile(models, percs[i+1], axis=0) - skymed,
-    #                     color=c, label=label, lw=lw)
-    # Starting figure
-    #fig = plt.figure(figsize=(2 * context.fig_width, 3))
-    #gs = fig.add_gridspec(ncols=1, nrows=2, height_ratios=[2, 1])
-    #ax = fig.add_subplot(gs[0,0])
-    #ax.fill_between(wave, flux + fluxerr, flux - fluxerr, color="0.8")
-    #ax.fill_between(wave, flux0 + fluxerr, flux0 - fluxerr,
-    #                label=name, color="tab:blue")
-    #for i in [0, 2, 1]:
-    #    c = colors[i]
-    #    per = percs[i]
-    #    label = "Model" if i == 1 else None
-    #    ax.fill_between(wave, np.percentile(models, per, axis=0) - skymed,
-    #                     np.percentile(models, percs[i+1], axis=0) - skymed,
-    #                     color=c, label=label, lw=lw)
     axes[0].set_ylabel(ylabel)
     #ax.text(0.1, 0.7, "    ".join(summary), transform=ax.transAxes, fontsize=7)
     plt.legend(loc=7)

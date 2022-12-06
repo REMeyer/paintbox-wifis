@@ -56,14 +56,20 @@ class CvDCaller():
         return self.sed(t)
 
 def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
-                  templates_file=None):
+                  templates_file=None, simple=False, short=False, alpha=False):
                   
-    wdir = os.path.join(context.home, "templates")
+    if alpha:
+        wdir = os.path.join(context.home, "templates_alpha")
+        temp_file_old = os.path.join(context.home,
+                                "templates_alpha/VCJ17_varydoublex_wifis.fits")
+    else:
+        wdir = os.path.join(context.home, "templates")
+        temp_file_old = os.path.join(context.home,
+                                "templates/VCJ17_varydoublex_wifis.fits")
+    templates_file = temp_file_old if templates_file is None else templates_file
+
     elements = ["C", "N", "Na", "Mg", "Si", "Ca", "Ti", "Fe", "K"] if \
                 elements is None else elements
-    temp_file_old = os.path.join(context.home,
-                            "templates/VCJ17_varydoublex_wifis.fits")
-    templates_file = temp_file_old if templates_file is None else templates_file
 
     # Loads template file, median normalizes templates
     #templates = fits.getdata(templates_file, ext=2)
@@ -72,9 +78,17 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
     templates /= tnorm[:, None]
     #params = Table.read(templates_file, hdu=3)
     params = Table.read(templates_file, hdu=1)
-    params = params[params.colnames[:4]]
+    if simple:
+        idx = np.where(np.logical_and(params['x1'] == 1.3,
+                    params['x2'] == 2.3))[0]
+        params = params[idx]
+        params = params[params.colnames[:2]]
+        templates = templates[idx]
+    else:
+        params = params[params.colnames[:4]]
 
     # If fitting for age, select only models between 9-14 Gyr (?)
+    # This code currently does not execute since the column name is "Age"
     if "age" in params.colnames:
         idx = np.where((params["age"] > 9) & (params["age"] < 14))[0]
         params = params[idx]
@@ -90,32 +104,42 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
     # For each param, store max and minimum, then create uniform prior dist
     for i, param in enumerate(params.colnames):
         vmin, vmax = params[param].min(), params[param].max()
-        #if param == 'age':
-        #    vmax = 7.0
+        if simple:
+            if param == 'Age':
+                vmax = 5.0
         limits[param] = (vmin, vmax)
         priors[param] = stats.uniform(loc=vmin, scale=vmax-vmin)
+        if simple:
+            params.rename_column(param, param+'_Simple')
     ssp = pb.ParametricModel(twave, params, templates)
 
     # Load elemental information?
-    for element in elements:
-        elem_file = os.path.join(wdir, "C18_rfs_wifis_{}.fits".format(element))
-        rfdata = fits.getdata(elem_file, ext=0)
-        rfpar = Table.read(elem_file, hdu=1)
-        #rfdata = fits.getdata(templates_file, extname="DATA.{}".format(element))
-        #rfpar = Table.read(templates_file, hdu="PARS.{}".format(element))
-        vmin, vmax = rfpar[element].min(), rfpar[element].max()
-        limits[element] = (vmin, vmax)
-        priors[element] = stats.uniform(loc=vmin, scale=vmax-vmin)
-        #ewave = Table.read(templates_file, hdu=1)["wave"].data
-        ewave = Table.read(elem_file, hdu=2)["wave"].data
-        rf = pb.ParametricModel(ewave, rfpar, rfdata)
-        ssp = ssp * pb.Resample(twave, rf)
+    if not simple:
+        for element in elements:
+            elem_file = os.path.join(wdir, "C18_rfs_wifis_{}.fits".format(element))
+            rfdata = fits.getdata(elem_file, ext=0)
+            rfpar = Table.read(elem_file, hdu=1)
+            #rfdata = fits.getdata(templates_file, extname="DATA.{}".format(element))
+            #rfpar = Table.read(templates_file, hdu="PARS.{}".format(element))
+            vmin, vmax = rfpar[element].min(), rfpar[element].max()
+            limits[element] = (vmin, vmax)
+            priors[element] = stats.uniform(loc=vmin, scale=vmax-vmin)
+            #ewave = Table.read(templates_file, hdu=1)["wave"].data
+            ewave = Table.read(elem_file, hdu=2)["wave"].data
+            rf = pb.ParametricModel(ewave, rfpar, rfdata)
+            ssp = ssp * pb.Resample(twave, rf)
 
-    # Adding extinction to the stellar populations
-    stars = pb.Resample(wave, pb.LOSVDConv(ssp))
     priors["Vsyst"] = stats.norm(loc=V, scale=100)
     #priors["Vsyst"] = stats.uniform(loc=V-100, scale=200)
     priors["sigma"] = stats.uniform(loc=100, scale=400)
+
+    if short:
+        # Adding extinction to the stellar populations
+        stars = pb.LOSVDConv(ssp)
+        return CvDCaller(stars), priors
+    else:
+        # Adding extinction to the stellar populations
+        stars = pb.Resample(wave, pb.LOSVDConv(ssp))
 
     # Adding a polynomial
     poly = pb.Polynomial(wave, porder)
@@ -207,7 +231,6 @@ def run_sampler(loglike, priors, outdb, nsteps=3000):
     return
 
 def plot_corner(trace, parnames, outroot, title=None, redo=False):
-    global labels
     title = "" if title is None else title
     output = "{}.png".format(outroot)
     if os.path.exists(output) and not redo:
@@ -222,7 +245,7 @@ def plot_corner(trace, parnames, outroot, title=None, redo=False):
     title = [title]
     for i, param in enumerate(parnames):
         s = "{0}$={1:.2f}^{{+{2:.2f}}}_{{-{3:.2f}}}$".format(
-            labels[param], v[i], vuerr[i], vlerr[i])
+            context.labels[param], v[i], vuerr[i], vlerr[i])
         title.append(s)
     grid = np.array(np.meshgrid(parnames, parnames)).reshape(2, -1).T
     fig = plt.figure(figsize=(3.54, 3.5))
@@ -249,11 +272,11 @@ def plot_corner(trace, parnames, outroot, title=None, redo=False):
             ax.axhline(np.percentile(y, 16), ls="--", c="k", lw=0.5)
             ax.axhline(np.percentile(y, 84), ls="--", c="k", lw=0.5)
         if i > N * (N - 1) - 1:
-            ax.set_xlabel(labels[p1], size=7)
+            ax.set_xlabel(context.labels[p1], size=7)
         else:
             ax.xaxis.set_ticklabels([])
         if i in np.arange(0, N * N, N)[1:]:
-            ax.set_ylabel(labels[p2], size=7)
+            ax.set_ylabel(context.labels[p2], size=7)
         else:
             ax.yaxis.set_ticklabels([])
         ax.axvline(np.median(x), ls="-", c="k", lw=0.5)
@@ -270,10 +293,9 @@ def plot_corner(trace, parnames, outroot, title=None, redo=False):
     plt.close(fig)
     return
 
-def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
+def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, redo=True, sky=None,
                  norm=1, unit_norm=1, lw=1, name=None, ylabel=None,
                  reslabel=None, liketype = 'studt'):
-    global labels
     ylabel = "$f_\lambda$ ($10^{{-{0}}}$ " \
              "erg cm$^{{-2}}$ s$^{{-1}}$ \\r{{A}}$^{{-1}}$)".format(unit_norm) \
              if ylabel is None else ylabel
@@ -318,11 +340,15 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, db, redo=True, sky=None,
     for i, param in enumerate(print_cols):
         if (i % 6 == 0) and (i>0):
             summary.append("\n")
-        t = traces[:,i]
-        m = np.median(t)
-        lowerr = m - np.percentile(t, 16)
-        uperr = np.percentile(t, 84) - m
-        s = "{}=${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}$".format(labels[param], m,
+        #t = traces[:,i]
+        #m = np.median(t)
+        #lowerr = m - np.percentile(t, 16)
+        #uperr = np.percentile(t, 84) - m
+        mask = tracetable['param'] == param
+        m = float(tracetable[mask]['median'])
+        lowerr = float(tracetable[mask]['lerr'])
+        uperr = float(tracetable[mask]['uerr'])
+        s = "{}=${:.2f}^{{+{:.2f}}}_{{-{:.2f}}}$".format(context.labels[param], m,
                                                        uperr, lowerr)
         summary.append(s)
     ############################################################################
@@ -442,12 +468,20 @@ def add_alpha(t, band="2mass_ks", quick=True):
 
 def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
                  sample_emiles="all", loglike="normal2", elements=None,
-                 nsteps=4000, postprocessing=False, porder=45, testing=False):
+                 linefit = False, nsteps=4000, postprocessing=False, porder=45, 
+                 testing=False):
     # Defining fit parameters based on model
     if ssp_model == "CvD":
         corner_pars = ['Z', 'Age', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
     elif ssp_model == "emiles":
         corner_pars = ['Z', 'T', 'x1', 'x2', 'Na', "Fe", 'Ca', "K"]
+    if elements != None:
+        adjusted_corner_pars = corner_pars[:3]
+        for par in corner_pars[4:]:
+            if par in elements:
+                adjusted_corner_pars.append(par)
+        corner_pars = adjusted_corner_pars
+    
     #Grabbing cube filename
     cubename = "{}_combined_cube_1_telluricreduced_{}_{}.fits".format(
                 galaxy, date, radius)
@@ -467,15 +501,15 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     # Rebinning data
     _, logwave, velscale = util.log_rebin([wave_lin[0], wave_lin[-1]],
                                            flux, velscale=velscale)
-    wave = np.exp(logwave)[20:-20]
+    wave = np.exp(logwave)[20:-5]
     flux, fluxerr = spectres(wave, wave_lin, flux_interp(wave_lin),
                              spec_errs=fluxerr_interp(wave_lin))
     ############################################################################
     # Inflationary term for testing with Student's T loglike
     if loglike == "studt":
-        #factor = 3. if radius=="R1" else 2.
-        factor = 1.
-        fluxerr *= factor
+        factor = 3. if radius=="R1" else 2.
+        #factor = 1.
+        #fluxerr *= factor
     else:
         factor = 1.
     ############################################################################
@@ -485,6 +519,8 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     flux /= norm
     fluxerr /= norm
     radius = cubename.split("_")[-1].split(".")[0]
+
+    # Building the model
     print("Producing SED model with paintbox...")
     if ssp_model == "CvD":
         sed, priors = build_sed_CvD(wave, elements=elements, V=V,
@@ -498,27 +534,41 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     #WIFIS Defs
     bluelow =  [9855, 10300, 11340, 11667, 11710, 12460, 12780, 12648, 
                     12240, 11905]
-    bluehigh = [9880, 10320, 11370, 11680, 11750, 12495, 12800, 12660, 
-                    12260, 11935]
-    linelow =  [9905, 10337, 11372, 11680, 11765, 12505, 12810, 12670, 
-                    12309, 11935]
-    linehigh = [9935, 10360, 11415, 11705, 11793, 12545, 12840, 12690, 
-                    12333, 11965]
-    redlow =   [9940, 10365, 11417, 11710, 11793, 12555, 12860, 12700, 
-                    12360, 12005]
+    #bluehigh = [9880, 10320, 11370, 11680, 11750, 12495, 12800, 12660, 
+    #                12260, 11935]
+    #linelow =  [9905, 10337, 11372, 11680, 11765, 12505, 12810, 12670, 
+    #                12309, 11935]
+    #linehigh = [9935, 10360, 11415, 11705, 11793, 12545, 12840, 12690, 
+    #                12333, 11965]
+    #redlow =   [9940, 10365, 11417, 11710, 11793, 12555, 12860, 12700, 
+    #                12360, 12005]
     redhigh =  [9970, 10390, 11447, 11750, 11810, 12590, 12870, 12720, 
                     12390, 12025]
     line_name = np.array(['FeH','CaI','NaI','KI_a','KI_b', 'KI_1.25', 'PaB',\
             'NaI127', 'NaI123','CaII119'])
-    regions = []
-    for low, high in zip(bluelow, redhigh):
-        regions.append((low,high))
 
-    sedmask = np.ones(len(sed.wave))
-    #regions = [(8800,9600),(11000,11300), (12900,13000)]
-    for region in regions:
-        maskx = np.where((sed.wave >= region[0]) & (sed.wave <= region[1]))[0]
-        sedmask[maskx] = 0
+    if linefit:
+        if galaxy == 'M85':
+            lines = ['FeH','CaI','NaI','KI_a','KI_b','KI_1.25', 'PaB', 'NaI123']
+        elif galaxy == 'NGC5557':
+            lines = ['FeH','NaI','KI_a','KI_b','KI_1.25','PaB','NaI127']
+        else:
+            lines = line_name
+
+        regions = []
+        for i in range(len(bluelow)):
+            if line_name[i] in lines:
+                regions.append((bluelow[i],redhigh[i]))
+        line_name = lines
+    else:
+        #regions = [(8800,9600),(11000,11600)]#, (12900,13000)]
+        regions = [(9600,11000),(11600,13500)]#, (12900,13000)]
+
+    #sedmask = np.ones(len(sed.wave))
+    sedmask = np.zeros(len(sed.wave))
+    #for region in regions:
+    #    maskx = np.where((sed.wave >= region[0]) & (sed.wave <= region[1]))[0]
+    #    sedmask[maskx] = 0
 
     if loglike == 'studt':
         logp = pb.StudTLogLike(flux, sed, obserr=fluxerr, mask=sedmask)
@@ -529,9 +579,10 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     if testing:
         return sed, priors, logp, flux, fluxerr
     
+    ############################################################################
+    # Running Sampler
     outdb = os.path.join(outdir, "{}_{}_{}_{}_{}.h5".format(
                         galaxy, radius, ssp_model, loglike, elements_str))
-
     if not os.path.exists(outdb):
         print("Running emcee...")
         run_sampler(logp, priors, outdb, nsteps=nsteps)
@@ -551,48 +602,40 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     trace = add_alpha(trace)
     make_summary_table(trace, outtab)
     corner_name = outdb.replace(".h5", "_corner")
-    #plot_corner(trace, corner_pars, corner_name,
-    #            title="{} {}".format(galaxy, radius), redo=True)
-    #print("Producing fitting figure...")
-    #plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, outdb,
-    #             redo=True, norm=norm, name=name, ylabel="Flux",
-    #             reslabel="Res. (\%)", liketype=loglike)
-    plotting.plot_linefit(wave, flux, fluxerr / factor, sed, tracedata, outdb,
-                 regions, line_name, redo=True, norm=norm, name=name, ylabel="Flux",
+    plot_corner(trace, corner_pars, corner_name,
+                title="{} {}".format(galaxy, radius), redo=True)
+    print("Producing fitting figure...")
+    trace = np.array(trace)
+    plotting.plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, trace, outdb, regions, 
+                 line_name, redo=True, linefit = linefit, norm=norm, name=name, ylabel="Flux",
                  reslabel="Res. (\%)", liketype=loglike)
+    #plotting.plot_linefit(wave, flux, fluxerr / factor, sed, tracedata, outdb,
+    #             regions, line_name, redo=True, norm=norm, name=name, ylabel="Flux",
+    #             reslabel="Res. (\%)", liketype=loglike)
 
 
 if __name__ == "__main__":
-    postprocessing = True# if getpass.getuser() == "kadu" else False
-    ssp_model = "CvD"
-    labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
-              "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]",
-              "Age": "Age (Gyr)", "x1": "$x_1$", "x2": "$x_2$", "Ca": "[Ca/H]",
-              "Fe": "[Fe/H]", "Age": "Age (Gyr)",
-              "Na": "[Na/Fe]" if ssp_model == "emiles" else "[Na/H]",
-              "K": "[K/H]", "C": "[C/H]", "N": "[N/H]",
-              "Mg": "[Mg/H]", "Si": "[Si/H]", "Ca": "[Ca/H]", "Ti": "[Ti/H]",
-              "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)",
-              "alpha_Ks": r"$\alpha_{\rm Ks}$",
-              "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
-
     if platform.node() == 'wifis-monster':
         wdir = os.path.join(context.home, "wifis-data")
     else:
         wdir = os.path.join(context.home, "elliot")
 
-    sample = ["M85"]#, "NGC5557"]
+    sample = ["M85", "NGC5557"]
+    #sample = ["NGC5557"]
     #date = {"M85": "20210324", "NGC5557": "20200709"}
     date = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
             "NGC5557": {'R1':"20200709", "R2":"20210324"}}
-    dirsuffix = 'LineFit'
-    forcedir = 'FullSpectralFitR1'
+    #dirsuffix = '20221129_BroadMaskFullFit'
+    dirsuffix = '20221206_FullSpectralFit'
+    #forcedir = 'FullSpectralFitR1'
+    forcedir = None
     V = {"M85": 729, "NGC5557": 3219}
 
     nsteps = 4000
-    # elements = ["Na", "Fe", "Ca", "K"]
+    #elements = ["Na", "Fe", "Ca", "K"]
+    #elements = ["Na", "Fe", "K"]
     elements = None
-    for galaxy in sample[::-1]:
+    for galaxy in sample:
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
         for radius in ["R1", "R2"]:
@@ -605,5 +648,6 @@ if __name__ == "__main__":
             print("=" * 80)
             print("Processing galaxy {}, region {}".format(galaxy, radius))
             run_paintbox(galaxy, radius, V[galaxy], date[galaxy][radius], outdir, 
-                        ssp_model=ssp_model, loglike="studt", elements=elements,
-                        postprocessing=postprocessing, nsteps=nsteps, porder=45)
+                        ssp_model=context.ssp_model, linefit = False, loglike="studt", 
+                        elements=elements, postprocessing=context.postprocessing, 
+                        nsteps=nsteps, porder=45)
