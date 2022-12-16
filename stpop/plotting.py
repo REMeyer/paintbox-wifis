@@ -92,7 +92,6 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions,
     fig = plt.figure(figsize=(2 * context.fig_width, 3))
     gs = fig.add_gridspec(ncols=1, nrows=2, height_ratios=[2, 1])
     ax = fig.add_subplot(gs[0,0])
-    ax.fill_between(wave, flux + fluxerr, flux - fluxerr, color="0.8")
     ax.fill_between(wave, flux0 + fluxerr, flux0 - fluxerr,
                     label=name, color="tab:blue")
     for i in [0, 2, 1]:
@@ -102,6 +101,7 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions,
         ax.fill_between(wave, np.percentile(models, per, axis=0) - skymed,
                          np.percentile(models, percs[i+1], axis=0) - skymed,
                          color=c, label=label, lw=lw)
+    ax.fill_between(wave, flux + fluxerr, flux - fluxerr, color="0.8")
     ax.set_ylabel(ylabel)
     ax.xaxis.set_ticklabels([])
     ax.text(0.1, 0.7, "    ".join(summary), transform=ax.transAxes, fontsize=7)

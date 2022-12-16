@@ -562,7 +562,7 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
         line_name = lines
     else:
         #regions = [(8800,9600),(11000,11600)]#, (12900,13000)]
-        regions = [(9600,11000),(11600,13500)]#, (12900,13000)]
+        regions = [(9600,11000),(11400,13500)]#, (12900,13000)]
 
     #sedmask = np.ones(len(sed.wave))
     sedmask = np.zeros(len(sed.wave))
@@ -626,7 +626,7 @@ if __name__ == "__main__":
     date = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
             "NGC5557": {'R1':"20200709", "R2":"20210324"}}
     #dirsuffix = '20221129_BroadMaskFullFit'
-    dirsuffix = '20221206_FullSpectralFit'
+    dirsuffix = '20221206_FullSpectralFit_ElevatedErrors'
     #forcedir = 'FullSpectralFitR1'
     forcedir = None
     V = {"M85": 729, "NGC5557": 3219}
