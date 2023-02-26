@@ -92,6 +92,7 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions,
     fig = plt.figure(figsize=(2 * context.fig_width, 3))
     gs = fig.add_gridspec(ncols=1, nrows=2, height_ratios=[2, 1])
     ax = fig.add_subplot(gs[0,0])
+    ax.fill_between(wave, flux + fluxerr, flux - fluxerr, color="0.8")
     ax.fill_between(wave, flux0 + fluxerr, flux0 - fluxerr,
                     label=name, color="tab:blue")
     for i in [0, 2, 1]:
@@ -101,7 +102,8 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions,
         ax.fill_between(wave, np.percentile(models, per, axis=0) - skymed,
                          np.percentile(models, percs[i+1], axis=0) - skymed,
                          color=c, label=label, lw=lw)
-    ax.fill_between(wave, flux + fluxerr, flux - fluxerr, color="0.8")
+    for region in regions:
+        ax.axvspan(region[0],region[1],facecolor='k',alpha=0.2)
     ax.set_ylabel(ylabel)
     ax.xaxis.set_ticklabels([])
     ax.text(0.1, 0.7, "    ".join(summary), transform=ax.transAxes, fontsize=7)
@@ -131,6 +133,8 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions,
     ax.axhline(y=0, ls="--", c="k", lw=1, zorder=1000)
     ax.set_xlabel(r"$\lambda$ (\r{A})")
     ax.set_ylabel(reslabel)
+    for region in regions:
+        ax.axvspan(region[0],region[1],facecolor='k',alpha=0.2)
     plt.legend(loc=1, framealpha=1)
     plt.subplots_adjust(left=0.07, right=0.995, hspace=0.02, top=0.99,
                         bottom=0.11)
