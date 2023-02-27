@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 
-Created on 23/11/17
+Originally created on 23/11/17
 
 Author : Carlos Eduardo Barbosa
+Updated by: R Elliot Meyer (2022/2023)
 
 Project context.
 
@@ -13,22 +14,33 @@ import os
 import platform
 
 import matplotlib
+import numpy as np
 # matplotlib.use('Agg')
 #matplotlib.use('qt5agg')
 # matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
 
+#### Run Settings
+# Observed target settings
+sample = ["M85", "NGC5557"]
+    #date = {"M85": "20210324", "NGC5557": "20200709"}
+obsdates = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
+        "NGC5557": {'R1':"20200709", "R2":"20210324"}}
+fit_regions = ["R1", "R2"]
+V = {"M85": 729, "NGC5557": 3219}
+kinematic_fit = True
+masking_regions = []
 
-if platform.node() == "asmaclap04":
-    home = "/Users/meyer/WIFIS/paintbox/wifis/stpop/data/"
-elif platform.node() == 'wifis-monster':
-    home = "/home/elliot/paintbox-wifis/stpop/data/"
+dirsuffix = '20230220_KinematicFitTest'
+#forcedir = 'FullSpectralFitR1'
+forcedir = None
 
-data_dir = os.path.join(home, "data")
-molecfit_exec_dir = os.path.join(home, "molecfit/bin")
-
+#### Model Settings
 postprocessing = True# if getpass.getuser() == "kadu" else False
 ssp_model = "CvD"
+loglike = "studt"
+nsteps = 4000
+porder = 45
 
 labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
               "alphaFe": r"[$\alpha$/Fe]", "NaFe": "[Na/Fe]",
@@ -40,11 +52,38 @@ labels = {"imf": r"$\Gamma_b$", "Z": "[Z/H]", "T": "Age (Gyr)",
               "V": "$V_*$ (km/s)", "sigma": "$\sigma_*$ (km/s)",
               "alpha_Ks": r"$\alpha_{\rm Ks}$",
               "M2L_Ks": r"(M/L)$_{\rm Ks}$"}
+#elements = ["Na", "Fe", "Ca", "K"]
+#elements = ["Na", "Fe", "K"]
+elements = None
 
+# Absorption Line definitions
+#WIFIS Defs
+bluelow =  [9855, 10300, 11340, 11667, 11710, 12460, 12780, 12648, 
+                12240, 11905]
+#bluehigh = [9880, 10320, 11370, 11680, 11750, 12495, 12800, 12660, 
+#                12260, 11935]
+#linelow =  [9905, 10337, 11372, 11680, 11765, 12505, 12810, 12670, 
+#                12309, 11935]
+#linehigh = [9935, 10360, 11415, 11705, 11793, 12545, 12840, 12690, 
+#                12333, 11965]
+#redlow =   [9940, 10365, 11417, 11710, 11793, 12555, 12860, 12700, 
+#                12360, 12005]
+redhigh =  [9970, 10390, 11447, 11750, 11810, 12590, 12870, 12720, 
+                12390, 12025]
+line_name = np.array(['FeH','CaI','NaI','KI_a','KI_b', 'KI_1.25', 'PaB',\
+        'NaI127', 'NaI123','CaII119'])
 
+#### Backend Settings
+if platform.node() == "asmaclap04":
+    home = "/Users/meyer/WIFIS/paintbox/wifis/stpop/data/"
+elif platform.node() == 'wifis-monster':
+    home = "/home/elliot/paintbox-wifis/stpop/data/"
+data_dir = os.path.join(home, "data")
+molecfit_exec_dir = os.path.join(home, "molecfit/bin")
+
+#### Matplotlib Settings
 fig_width = 3.54 # inches - A&A template
 
-# Matplotlib settings
 plt.style.context("seaborn-paper")
 plt.rcParams["text.usetex"] = True
 plt.rcParams["font.family"] = "serif"

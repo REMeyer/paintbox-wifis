@@ -5,6 +5,7 @@ from astropy.io import fits
 from astropy.table import Table, vstack
 import paintbox as pb
 from tqdm import tqdm
+import seaborn as sns
 import os
 import context
 
@@ -168,7 +169,77 @@ def plot_fitting(wave, flux, fluxerr, sed, traces, tracetable, db, regions,
         plt.savefig("{}.png".format(outfig), dpi=250)
         plt.close()
 
+    return
 
+def plot_corner(trace, parnames, outroot, title=None, redo=False):
+
+    # Check to see if the items inside parnames exist in the model
+    new_parnames = []
+    for param in parnames:
+        if param in trace.colnames:
+            new_parnames.append(param)
+    parnames = new_parnames
+
+    title = "" if title is None else title
+    output = "{}.png".format(outroot)
+    if os.path.exists(output) and not redo:
+        return
+    N = len(parnames)
+    data = np.stack([trace[p] for p in parnames]).T
+    v = np.percentile(data, 50, axis=0)
+    vmax = np.percentile(data, 84, axis=0)
+    vmin = np.percentile(data, 16, axis=0)
+    vuerr = vmax - v
+    vlerr = v - vmin
+    title = [title]
+    for i, param in enumerate(parnames):
+        s = "{0}$={1:.2f}^{{+{2:.2f}}}_{{-{3:.2f}}}$".format(
+            context.labels[param], v[i], vuerr[i], vlerr[i])
+        title.append(s)
+    grid = np.array(np.meshgrid(parnames, parnames)).reshape(2, -1).T
+    fig = plt.figure(figsize=(3.54, 3.5))
+    gs = fig.add_gridspec(ncols=N, nrows=N)
+    for i, (p1, p2) in enumerate(grid):
+        i1 = parnames.index(p1)
+        i2 = parnames.index(p2)
+        ax = fig.add_subplot(gs[i // N, i % N])
+        # ax = axs[i // N, i % N]
+        ax.tick_params(axis="both", which='major',
+                       labelsize=4)
+        if i // N < i % N:
+            ax.set_visible(False)
+            continue
+        x = data[:,i1]
+        if p1 == p2:
+            hist = sns.kdeplot(x, shade=True, ax=ax, color="tab:blue",
+                            legend=False)
+            hist.set(ylabel=None)
+        else:
+            y = data[:, i2]
+            sns.kdeplot(x, y, shade=True, ax=ax, cmap="Blues")
+            ax.axhline(np.median(y), ls="-", c="k", lw=0.5)
+            ax.axhline(np.percentile(y, 16), ls="--", c="k", lw=0.5)
+            ax.axhline(np.percentile(y, 84), ls="--", c="k", lw=0.5)
+        if i > N * (N - 1) - 1:
+            ax.set_xlabel(context.labels[p1], size=7)
+        else:
+            ax.xaxis.set_ticklabels([])
+        if i in np.arange(0, N * N, N)[1:]:
+            ax.set_ylabel(context.labels[p2], size=7)
+        else:
+            ax.yaxis.set_ticklabels([])
+        ax.axvline(np.median(x), ls="-", c="k", lw=0.5)
+        ax.axvline(np.percentile(x, 16), ls="--", c="k", lw=0.5)
+        ax.axvline(np.percentile(x, 84), ls="--", c="k", lw=0.5)
+    plt.text(0.6, 0.55, "\n".join(title), transform=plt.gcf().transFigure,
+             size=8)
+    plt.subplots_adjust(left=0.12, right=0.995, top=0.98, bottom=0.08,
+                        hspace=0.04, wspace=0.04)
+    fig.align_ylabels()
+    for fmt in tqdm(["png", "pdf"], desc="Saving to disk"):
+        output = "{}.{}".format(outroot, fmt)
+        plt.savefig(output, dpi=200)
+    plt.close(fig)
     return
 
 def plot_linefit(wave, flux, fluxerr, sed, traces, db, regions, line_name,
