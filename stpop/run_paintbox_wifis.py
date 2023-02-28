@@ -4,13 +4,13 @@
 Created on 09/10/18
 
 Author : Carlos Eduardo Barbosa
+Updated by: R Elliot Meyer (2022/2023)
 
 Run paintbox in the central part of M85 using WIFIS data.
 
 """
 
 import os
-import getpass
 import copy
 import platform
 
@@ -37,7 +37,17 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class CvDCaller():
-    ''' Class that defines the CvD models'''
+    ''' 
+    Class that defines the CvD models.
+
+    Arguments
+    ---------
+    sed:        Paintbox ParametricModel or similar, built using CvD models.
+
+    Methods
+    ---------
+    call:       Calls the input models with parameters theta 
+    '''
     def __init__(self, sed):
         self.sed = sed
         self.parnames = list(dict.fromkeys(sed.parnames))
@@ -46,9 +56,13 @@ class CvDCaller():
         self._shape = len(self.sed.parnames)
         self._idxs = {}
         for param in self.parnames:
-            self._idxs[param] = np.where(np.array(self.sed.parnames) == param)[0]
+            self._idxs[param] = np.where(np.array(self.sed.parnames) 
+                                            == param)[0]
 
     def __call__(self, theta):
+        '''Calls model with parameters (theta).
+           Returns model with the input parameters
+        '''
         t = np.zeros(self._shape)
         for param, val in zip(self.parnames, theta):
             t[self._idxs[param]] = val
@@ -56,7 +70,11 @@ class CvDCaller():
 
 def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
                   templates_file=None, simple=False, short=False, alpha=False,
-                  kinematic_fit=False):
+                  kinematic_fit=False, kinematic_priors = None):
+    '''
+    Builds a model SED using paintbox ParametricModel instances using CvD models
+    and a various elemental abundances, kinematic constraints, and options.
+    '''
                   
     if alpha:
         wdir = os.path.join(context.home, "templates_alpha")
@@ -132,7 +150,11 @@ def build_sed_CvD(wave, velscale=200, porder=45, elements=None, V=0,
 
     priors["Vsyst"] = stats.norm(loc=V, scale=100)
     #priors["Vsyst"] = stats.uniform(loc=V-100, scale=200)
-    priors["sigma"] = stats.uniform(loc=100, scale=400)
+    if kinematic_priors:
+        sigma, width = kinematic_priors
+        priors["sigma"] = stats.norm(loc=sigma, scale=width)
+    else:
+        priors["sigma"] = stats.uniform(loc=100, scale=400)
 
     if short:
         # Adding extinction to the stellar populations
@@ -295,10 +317,26 @@ def add_alpha(t, band="2mass_ks", quick=True):
     outtab["alpha_Ks"] = alphas
     return outtab
 
-def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
-                 sample_emiles="all", loglike="normal2", elements=None,
-                 linefit = False, nsteps=4000, postprocessing=False, porder=45, 
-                 testing=False, kinematic_fit=False, inflationary = False):
+def run_paintbox(
+        galaxy, 
+        radius, 
+        V, 
+        date, 
+        outdir, 
+        velscale=200, 
+        ssp_model="CvD",
+        sample_emiles="all", 
+        loglike="normal2", 
+        elements=None,
+        linefit = False, 
+        nsteps=4000, 
+        postprocessing=False, 
+        porder=45, 
+        testing=False, 
+        kinematic_fit=False, 
+        inflationary = False,
+        kinematic_priors = None,
+        ):
 
     # Defining fit parameters based on model
     if ssp_model == "CvD":
@@ -335,7 +373,7 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     flux, fluxerr = spectres(wave, wave_lin, flux_interp(wave_lin),
                              spec_errs=fluxerr_interp(wave_lin))
 
-    ############################################################################
+    ###########################################################################
     # Uncertainty inflationary term for testing with Student's T loglike
     if inflationary and loglike == "studt":
         factor = 3. if radius=="R1" else 2.
@@ -343,7 +381,7 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
         fluxerr *= factor
     else:
         factor = 1.
-    ############################################################################
+    ###########################################################################
 
     # Normalizing the data
     norm = np.median(flux)
@@ -356,7 +394,8 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     if ssp_model == "CvD":
         sed, priors = build_sed_CvD(wave, elements=elements, V=V,
                                     porder=porder,
-                                    kinematic_fit=kinematic_fit)
+                                    kinematic_fit=kinematic_fit,
+                                    kinematic_priors=kinematic_priors)
     elif ssp_model == "emiles":
         sed = build_sed_model_emiles(wave, sample=sample_emiles)
     print("Done!")
@@ -371,7 +410,7 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
         else:
             lines = context.line_name
 
-        for i in range(len(bluelow)):
+        for i in range(len(context.bluelow)):
             if context.line_name[i] in lines:
                 regions.append((context.bluelow[i],context.redhigh[i]))
         line_name = lines
@@ -389,7 +428,8 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
     sedmask = np.zeros(len(sed.wave))
     if len(regions) > 0:
         for region in regions:
-            maskx = np.where((sed.wave >= region[0]) & (sed.wave <= region[1]))[0]
+            maskx = np.where((sed.wave >= region[0]) & 
+                             (sed.wave <= region[1]))[0]
             sedmask[maskx] = 1
 
     if loglike == 'studt':
@@ -436,9 +476,11 @@ def run_paintbox(galaxy, radius, V, date, outdir, velscale=200, ssp_model="CvD",
                 title="{} {}".format(galaxy, radius), redo=True)
     print("Producing fitting figure...")
     trace = np.array(trace)
-    plotting.plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, trace, outdb, regions, 
-                 context.line_name, redo=True, linefit = linefit, norm=norm, name=name, 
-                 ylabel="Flux", reslabel="Res. (\%)", liketype=loglike)
+    plotting.plot_fitting(wave, flux, fluxerr / factor, sed, tracedata, trace, 
+                          outdb, regions, context.line_name, redo=True, 
+                          linefit = linefit, norm=norm, name=name, 
+                          ylabel="Flux", reslabel="Res. (\%)", 
+                          liketype=loglike)
 
 if __name__ == "__main__":
     # CHANGE ALL SETTINGS IN THE context.py SCRIPT
@@ -452,6 +494,9 @@ if __name__ == "__main__":
         galdir = os.path.join(wdir, galaxy)
         os.chdir(galdir)
         for radius in context.fit_regions:
+            kin_priors = None
+            if context.kin_priors:
+                kin_priors = context.kin_priors[galaxy][radius]
             if context.forcedir:
                 outdir = os.path.join(galdir, context.forcedir)
             else:
@@ -472,4 +517,5 @@ if __name__ == "__main__":
                          nsteps=context.nsteps, 
                          porder=context.porder, 
                          linefit = False, 
-                         kinematic_fit=True)
+                         kinematic_fit=True,
+                         kinematic_priors = kin_priors)

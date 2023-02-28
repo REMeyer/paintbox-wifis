@@ -22,12 +22,15 @@ import matplotlib.pyplot as plt
 
 #### Run Settings
 # Observed target settings
-sample = ["M85", "NGC5557"]
-    #date = {"M85": "20210324", "NGC5557": "20200709"}
+sample = ["M85", "NGC5557"] # Target names
+fit_regions = ["R1", "R2"] # Fitting/spectral regions
+# Dictionary of observing dates, for filepath
 obsdates = {"M85": {'R1': "20210324", 'R2': '20210324'}, 
         "NGC5557": {'R1':"20200709", "R2":"20210324"}}
-fit_regions = ["R1", "R2"]
-V = {"M85": 729, "NGC5557": 3219}
+# Kinematic Priors. Format is (sigma, width). If not using, set to None
+kin_priors = {"M85": {'R1': (142,12), 'R2': (177,17)}, 
+        "NGC5557": {'R1': (220,30), "R2": (164,25)}}
+V = {"M85": 729, "NGC5557": 3219} # Estimate of 
 kinematic_fit = True
 masking_regions = []
 
